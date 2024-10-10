@@ -17,13 +17,79 @@ from utils.video_utils import create_video_from_images
 Hyperparam for Ground and Tracking
 """
 MODEL_ID = "IDEA-Research/grounding-dino-tiny"
-VIDEO_PATH = "./assets/hippopotamus.mp4"
-TEXT_PROMPT = "hippopotamus."
-OUTPUT_VIDEO_PATH = "./hippopotamus_tracking_demo.mp4"
-SOURCE_VIDEO_FRAME_DIR = "./custom_video_frames"
-SAVE_TRACKING_RESULTS_DIR = "./tracking_results"
+VIDEO_PATH = "./all_7-th.mp4"
+TEXT_PROMPT = "object."
+OUTPUT_VIDEO_PATH = "./object.mp4"
+SOURCE_VIDEO_FRAME_DIR = "./object_frame/"
+SAVE_TRACKING_RESULTS_DIR = "./object_result/"
 PROMPT_TYPE_FOR_VIDEO = "box" # choose from ["point", "box", "mask"]
+def calculate_iou(bbx1, bbx2):
+    """计算两个边界框的IOU（Intersection over Union）。"""
+    x1 = max(bbx1[0], bbx2[0])
+    y1 = max(bbx1[1], bbx2[1])
+    x2 = min(bbx1[2], bbx2[2])
+    y2 = min(bbx1[3], bbx2[3])
 
+    intersection = max(0, x2 - x1) * max(0, y2 - y1)
+    area1 = (bbx1[2] - bbx1[0]) * (bbx1[3] - bbx1[1])
+    area2 = (bbx2[2] - bbx2[0]) * (bbx2[3] - bbx2[1])
+    
+    # 计算相交面积对两个边界框面积的比例
+    ratio1 = intersection / area1 if area1 > 0 else 0
+    ratio2 = intersection / area2 if area2 > 0 else 0
+    
+    return ratio1, ratio2
+
+def filter_bboxes(bbx, labels, confidences, iou_threshold=0.8):
+    """过滤边界框，删除满足条件的边界框。"""
+    # 根据confidence从高到低排序
+    indices = np.argsort(confidences)[::-1]
+    bbx = bbx[indices]
+    labels = np.array(labels)[indices]
+    confidences = np.array(confidences)[indices]
+
+    to_delete = set()
+    for i in range(len(bbx)):
+        if i in to_delete:
+            continue
+        
+        current_bbx = bbx[i]
+        current_area = (current_bbx[2] - current_bbx[0]) * (current_bbx[3] - current_bbx[1])
+        
+        # 找到与当前bbx的IOU超过阈值的所有bbx
+        contained_bbx = []
+        for j in range(len(bbx)):
+            if i != j and j not in to_delete:
+                ratio1, ratio2 = calculate_iou(current_bbx, bbx[j])
+                if ratio1 > iou_threshold or ratio2 > iou_threshold:
+                    contained_bbx.append(bbx[j])
+
+        # 如果包含两个以上的bbx
+        if len(contained_bbx) >= 2:
+            # 计算平均面积
+            avg_area = np.mean([(bb[2] - bb[0]) * (bb[3] - bb[1]) for bb in contained_bbx])
+            large_bbx_found = any((bb[2] - bb[0]) * (bb[3] - bb[1]) > 2 * avg_area for bb in contained_bbx)
+
+            if large_bbx_found:
+                to_delete.add(i)  # 标记当前bbx删除
+
+    # 过滤掉要删除的边界框
+    filtered_bbx = np.array([bbx[i] for i in range(len(bbx)) if i not in to_delete])
+    filtered_labels = [labels[i] for i in range(len(labels)) if i not in to_delete]
+    filtered_confidences = [confidences[i] for i in range(len(confidences)) if i not in to_delete]
+
+    return filtered_bbx, filtered_labels, filtered_confidences
+
+def filte_big_box(boxes, labels, confidences,total_area) : 
+    assert boxes.shape[1] == 4 
+    areas = (input_boxes[:, 2] - input_boxes[:, 0]) * (input_boxes[:, 3] - input_boxes[:, 1]) 
+    mask =( areas  / total_area )  < 0.5
+    filtered_boxes = boxes[mask]
+    filtered_labels = [label for i, label in enumerate(labels) if mask[i]]
+    filtered_confid = [conf for i, conf in enumerate(confidences) if mask[i]]
+    filtered_boxes, filtered_labels, filtered_confid = filter_bboxes(filtered_boxes, filtered_labels, filtered_confid)
+
+    return filtered_boxes, filtered_labels, filtered_confid
 """
 Step 1: Environment settings and model initialization for SAM 2
 """
@@ -94,19 +160,23 @@ with torch.no_grad():
 results = processor.post_process_grounded_object_detection(
     outputs,
     inputs.input_ids,
-    box_threshold=0.4,
-    text_threshold=0.3,
+    box_threshold=0.2,
+    text_threshold=0.2,
     target_sizes=[image.size[::-1]]
 )
 
 input_boxes = results[0]["boxes"].cpu().numpy()
+
 confidences = results[0]["scores"].cpu().numpy().tolist()
 class_names = results[0]["labels"]
-
+converted_image = np.array(image.convert("RGB"))
+h, w = converted_image.shape[:2]
+print('before processed', input_boxes)
+input_boxes, class_names, confidences = filte_big_box(input_boxes, class_names, confidences, w * h)
 print(input_boxes)
 
 # prompt SAM image predictor to get the mask for the object
-image_predictor.set_image(np.array(image.convert("RGB")))
+image_predictor.set_image(converted_image)
 
 # process the detection results
 OBJECTS = class_names
@@ -123,7 +193,13 @@ masks, scores, logits = image_predictor.predict(
 # convert the mask shape to (n, H, W)
 if masks.ndim == 4:
     masks = masks.squeeze(1)
-
+# 遍历每个物体的掩码并保存为 PNG 文件
+for i, mask in enumerate(masks):
+    # 将掩码转换为图片格式 (0, 255)
+    img = Image.fromarray((mask * 255).astype(np.uint8))
+    
+    # 保存为 PNG 文件
+    img.save(f"mask_object_{i}.png")
 """
 Step 3: Register each object's positive points to video predictor with seperate add_new_points call
 """
