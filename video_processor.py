@@ -150,7 +150,8 @@ class VideoProcessor:
         ) as sink:
             for frame in tqdm(frame_generator, desc="saving video frames"):
                 sink.save_image(frame)
-    def load_frame_name(self):
+
+    def check_if_need_split(self):
         if self.re_split:
             self.split_video()
         else:
@@ -158,6 +159,9 @@ class VideoProcessor:
                 self.split_video()
             elif os.path.exists(self.source_video_frame_dir) and len(os.listdir(self.source_video_frame_dir)) == 0:
                 self.split_video()
+
+
+    def load_frame_name(self):
         # scan all the JPEG frame names in this directory
         frame_names = [
             p for p in os.listdir(self.source_video_frame_dir)
@@ -182,10 +186,9 @@ class VideoProcessor:
         idx = 0
         self.set_ref_idx(idx)
     # prompt grounding dino to get the box coordinates on specific frame
-    def gdino_process(self, idx=0):
-        self.load_frame_name()
-        self.set_ref_idx(idx)
-        img_path = os.path.join(self.source_video_frame_dir, self.frame_names[idx])
+    def gdino_process(self):
+        assert hasattr(self, 'ann_frame_idx')
+        img_path = os.path.join(self.source_video_frame_dir, self.frame_names[self.ann_frame_idx])
         image = Image.open(img_path)
         inputs = self.processor(images=image, text=self.text_prompt, return_tensors="pt").to(self.device)
         with torch.no_grad():
@@ -213,7 +216,6 @@ class VideoProcessor:
     def sam2_image_process(self):
 
         # prompt SAM image predictor to get the mask for the object
-        self.gdino_process()
         self.image_predictor.set_image(self.converted_image)
 
         # process the detection results
@@ -233,7 +235,6 @@ class VideoProcessor:
             save_mask(self.image_masks)
 
     def prepare_sam2_video(self):
-        self.sam2_image_process()
 
         """
         Step 3: Register each object's positive points to video predictor with seperate add_new_points call
@@ -284,7 +285,6 @@ class VideoProcessor:
         Step 4: Propagate the video predictor to get the segmentation results for each frame
         """
         # prev_seg = 
-        self.prepare_sam2_video()
         self.video_segments = {}  # self.video_segments contains the per-frame segmentation results
         for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=False):
             self.video_segments[out_frame_idx] = {
@@ -295,7 +295,6 @@ class VideoProcessor:
         """
         Step 5: Visualize the segment results across the video and save them
         """
-        self.propagate_in_video()
         if not os.path.exists(self.save_tracking_results_dir):
             os.makedirs(self.save_tracking_results_dir)
 
@@ -337,6 +336,19 @@ class VideoProcessor:
     
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
         self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
+        
+        self.check_if_need_split()
+        self.load_frame_name()
+        
+        self.set_better_ref()
+
+        self.gdino_process()
+
+        self.sam2_image_process()
+
+        self.prepare_sam2_video()
+
+        self.propagate_in_video()
 
         self.vis_and_save()
 
