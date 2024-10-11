@@ -176,19 +176,15 @@ class VideoProcessor:
         # init video predictor state
 
         self.frame_names = frame_names
+        self.video_len = len(frame_names)
         self.inference_state = self.video_predictor.init_state(video_path=self.source_video_frame_dir)
 
         return frame_names
     def set_ref_idx(self, idx=0):
+        print('set frame idx to', idx)
         self.ann_frame_idx = idx  # the frame index we interact with
 
-    def set_better_ref(self):
-        idx = 0
-        self.set_ref_idx(idx)
-    # prompt grounding dino to get the box coordinates on specific frame
-    def gdino_process(self):
-        assert hasattr(self, 'ann_frame_idx')
-        img_path = os.path.join(self.source_video_frame_dir, self.frame_names[self.ann_frame_idx])
+    def gdino_inner_process(self,img_path):
         image = Image.open(img_path)
         inputs = self.processor(images=image, text=self.text_prompt, return_tensors="pt").to(self.device)
         with torch.no_grad():
@@ -206,6 +202,29 @@ class VideoProcessor:
 
         confidences = results[0]["scores"].cpu().numpy().tolist()
         class_names = results[0]["labels"]
+
+        return image, input_boxes, confidences, class_names
+
+
+    def set_better_ref(self):
+        stride = 10 if self.video_len < 100 else self.video_len // 10
+        max_num = 0 
+        
+        for idx in range(0, self.video_len, stride):
+            img_path = os.path.join(self.source_video_frame_dir, self.frame_names[idx])
+            _, boxes, _, _  = self.gdino_inner_process(img_path)
+            boxes_len = boxes.shape[0]
+            if boxes_len > max_num:
+                max_num = boxes_len 
+                self.set_ref_idx(idx)
+
+
+    # prompt grounding dino to get the box coordinates on specific frame
+    def gdino_process(self):
+        assert hasattr(self, 'ann_frame_idx')
+        img_path = os.path.join(self.source_video_frame_dir, self.frame_names[self.ann_frame_idx])
+        image, input_boxes, confidences, class_names = self.gdino_inner_process(img_path)
+
         converted_image = np.array(image.convert("RGB"))
         h, w = converted_image.shape[:2]
         print('before processed', input_boxes.shape)
