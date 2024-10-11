@@ -17,11 +17,11 @@ from utils.video_utils import create_video_from_images
 Hyperparam for Ground and Tracking
 """
 MODEL_ID = "IDEA-Research/grounding-dino-tiny"
-VIDEO_PATH = "./all_7-th.mp4"
+VIDEO_PATH = "test.mp4"
 TEXT_PROMPT = "object."
 OUTPUT_VIDEO_PATH = "./object.mp4"
-SOURCE_VIDEO_FRAME_DIR = "./object_frame/"
-SAVE_TRACKING_RESULTS_DIR = "./object_result/"
+SOURCE_VIDEO_FRAME_DIR = "./object_frame_n/"
+SAVE_TRACKING_RESULTS_DIR = "./object_result_n/"
 PROMPT_TYPE_FOR_VIDEO = "box" # choose from ["point", "box", "mask"]
 def calculate_iou(bbx1, bbx2):
     """计算两个边界框的IOU（Intersection over Union）。"""
@@ -145,7 +145,7 @@ frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
 # init video predictor state
 inference_state = video_predictor.init_state(video_path=SOURCE_VIDEO_FRAME_DIR)
 
-ann_frame_idx = 0  # the frame index we interact with
+ann_frame_idx = 15  # the frame index we interact with
 """
 Step 2: Prompt Grounding DINO 1.5 with Cloud API for box coordinates
 """
@@ -161,7 +161,7 @@ results = processor.post_process_grounded_object_detection(
     outputs,
     inputs.input_ids,
     box_threshold=0.2,
-    text_threshold=0.2,
+    text_threshold=0.20,
     target_sizes=[image.size[::-1]]
 )
 
@@ -246,8 +246,9 @@ else:
 """
 Step 4: Propagate the video predictor to get the segmentation results for each frame
 """
+# prev_seg = 
 video_segments = {}  # video_segments contains the per-frame segmentation results
-for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state):
+for out_frame_idx, out_obj_ids, out_mask_logits in video_predictor.propagate_in_video(inference_state,reverse=False):
     video_segments[out_frame_idx] = {
         out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
         for i, out_obj_id in enumerate(out_obj_ids)
