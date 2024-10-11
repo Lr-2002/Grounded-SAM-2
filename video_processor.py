@@ -130,12 +130,11 @@ class VideoProcessor:
         self.grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id).to(self.device)
         self.save_mask = save_mask
         self.re_split = re_split
-    """
-    Custom video input directly using video files
-    """
-
 
     def split_video(self):
+        """
+        Custom video input directly using video files
+        """
         video_info = sv.VideoInfo.from_video_path(self.video_path)  # get video info
         print(video_info)
         frame_generator = sv.get_video_frames_generator(self.video_path, stride=1, start=0, end=None)
@@ -207,36 +206,34 @@ class VideoProcessor:
         converted_image = np.array(image.convert("RGB"))
         h, w = converted_image.shape[:2]
         print('before processed', input_boxes.shape)
-        input_boxes, class_names, confidences = filte_big_box(input_boxes, class_names, confidences, w * h)
+        self.input_boxes, self.class_names, self.confidences = filte_big_box(input_boxes, class_names, confidences, w * h)
         print(input_boxes.shape)
-        return converted_image, input_boxes, class_names, confidences
+        self.objects = self.class_names
+        self.converted_image = converted_image
     def sam2_image_process(self):
 
         # prompt SAM image predictor to get the mask for the object
-        converted_image, input_boxes, class_names, confidences = self.gdino_process()
-        self.image_predictor.set_image(converted_image)
+        self.gdino_process()
+        self.image_predictor.set_image(self.converted_image)
 
         # process the detection results
-        OBJECTS = class_names
 
-        print(OBJECTS)
-
+        print(self.objects)
         # prompt SAM 2 image predictor to get the mask for the object
-        masks, scores, logits = self.image_predictor.predict(
+        self.image_masks, self.image_scores, self.image_logits = self.image_predictor.predict(
             point_coords=None,
             point_labels=None,
-            box=input_boxes,
+            box=self.input_boxes,
             multimask_output=False,
         )
         # convert the mask shape to (n, H, W)
-        if masks.ndim == 4:
-            masks = masks.squeeze(1)
+        if self.image_masks.ndim == 4:
+            self.image_masks = self.image_masks.squeeze(1)
         if self.save_mask:
-            save_mask(masks)
-        return masks, scores, logits, OBJECTS, input_boxes
+            save_mask(self.image_masks)
 
     def prepare_sam2_video(self):
-        masks, scores, logits, objects, input_boxes = self.sam2_image_process()
+        self.sam2_image_process()
 
         """
         Step 3: Register each object's positive points to video predictor with seperate add_new_points call
@@ -246,10 +243,10 @@ class VideoProcessor:
 
         # If you are using point prompts, we uniformly sample positive points based on the mask
         if self.prompt_type_for_video == "point":
-            # sample the positive points from mask for each objects
-            all_sample_points = sample_points_from_masks(masks=masks, num_points=10)
+            # sample the positive points from mask for each self.objects
+            all_sample_points = sample_points_from_masks(masks=self.image_masks, num_points=10)
 
-            for object_id, (label, points) in enumerate(zip(objects, all_sample_points), start=1):
+            for object_id, (label, points) in enumerate(zip(self.objects, all_sample_points), start=1):
                 labels = np.ones((points.shape[0]), dtype=np.int32)
                 _, out_obj_ids, out_mask_logits = self.video_predictor.add_new_points_or_box(
                     inference_state=self.inference_state,
@@ -260,7 +257,7 @@ class VideoProcessor:
                 )
         # Using box prompt
         elif self.prompt_type_for_video == "box":
-            for object_id, (label, box) in enumerate(zip(objects, input_boxes), start=1):
+            for object_id, (label, box) in enumerate(zip(self.objects, self.input_boxes), start=1):
                 _, out_obj_ids, out_mask_logits = self.video_predictor.add_new_points_or_box(
                     inference_state=self.inference_state,
                     frame_idx=self.ann_frame_idx,
@@ -269,7 +266,7 @@ class VideoProcessor:
                 )
         # Using mask prompt is a more straightforward way
         elif self.prompt_type_for_video == "mask":
-            for object_id, (label, mask) in enumerate(zip(objects, masks), start=1):
+            for object_id, (label, mask) in enumerate(zip(self.objects, self.image_masks), start=1):
                 labels = np.ones((1), dtype=np.int32)
                 _, out_obj_ids, out_mask_logits = self.video_predictor.add_new_mask(
                     inference_state=self.inference_state,
@@ -280,32 +277,31 @@ class VideoProcessor:
         else:
             raise NotImplementedError("SAM 2 video predictor only support point/box/mask prompts")
 
-        return objects
+        return self.objects
 
     def propagate_in_video(self):
         """
         Step 4: Propagate the video predictor to get the segmentation results for each frame
         """
         # prev_seg = 
-        objects = self.prepare_sam2_video()
-        video_segments = {}  # video_segments contains the per-frame segmentation results
+        self.prepare_sam2_video()
+        self.video_segments = {}  # self.video_segments contains the per-frame segmentation results
         for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=False):
-            video_segments[out_frame_idx] = {
+            self.video_segments[out_frame_idx] = {
                 out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
                 for i, out_obj_id in enumerate(out_obj_ids)
             }
-        return video_segments, objects
     def vis_and_save(self):
         """
         Step 5: Visualize the segment results across the video and save them
         """
-        video_segments, objects = self.propagate_in_video()
+        self.propagate_in_video()
         if not os.path.exists(self.save_tracking_results_dir):
             os.makedirs(self.save_tracking_results_dir)
 
-        ID_TO_OBJECTS = {i: obj for i, obj in enumerate(objects, start=1)}
+        ID_TO_OBJECTS = {i: obj for i, obj in enumerate(self.objects, start=1)}
 
-        for frame_idx, segments in video_segments.items():
+        for frame_idx, segments in self.video_segments.items():
             img = cv2.imread(os.path.join(self.source_video_frame_dir, self.frame_names[frame_idx]))
             
             object_ids = list(segments.keys())
