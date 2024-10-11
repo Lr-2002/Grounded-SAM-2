@@ -305,7 +305,8 @@ class VideoProcessor:
         """
         # prev_seg = 
         self.video_segments = {}  # self.video_segments contains the per-frame segmentation results
-        for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=True):
+        reverse = self.ann_frame_idx != 0 
+        for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=reverse):
             self.video_segments[out_frame_idx] = {
                 out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
                 for i, out_obj_id in enumerate(out_obj_ids)
@@ -318,7 +319,7 @@ class VideoProcessor:
             os.makedirs(self.save_tracking_results_dir)
 
         ID_TO_OBJECTS = {i: obj for i, obj in enumerate(self.objects, start=1)}
-
+        # print(self.video_segments.items())
         for frame_idx, segments in self.video_segments.items():
             img = cv2.imread(os.path.join(self.source_video_frame_dir, self.frame_names[frame_idx]))
             
@@ -351,6 +352,10 @@ class VideoProcessor:
         self.output_video_path = output_video_path
         self.source_video_frame_dir = source_video_frame_dir
         self.save_tracking_results_dir = save_tracking_results_dir
+
+        import shutil
+        shutil.rmtree(save_tracking_results_dir)
+        
         print('updated video path is ' , self.video_path)
     
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
@@ -373,4 +378,12 @@ class VideoProcessor:
 
 if __name__=='__main__':
     process_model = VideoProcessor(re_split=True)
-    process_model.update_and_process('./test.mp4')
+    videos = os.listdir('./test_videos')
+    cnt = 0
+    for video in videos:
+        cnt +=1 
+        if cnt > 5 :
+            break
+        video_path = './test_videos/' + video
+        process_model.update_and_process(video_path, 'output_video/'+ video)
+    #process_model.update_and_process('./test_videos/004803_0_0.mp4')
