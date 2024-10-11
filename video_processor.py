@@ -305,7 +305,7 @@ class VideoProcessor:
         """
         # prev_seg = 
         self.video_segments = {}  # self.video_segments contains the per-frame segmentation results
-        for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=False):
+        for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=True):
             self.video_segments[out_frame_idx] = {
                 out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
                 for i, out_obj_id in enumerate(out_obj_ids)
