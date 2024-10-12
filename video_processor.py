@@ -393,12 +393,31 @@ class VideoProcessor:
         np.savez_compressed(frame_path, **data)
 
         # Optionally, remove the original video file if it exists
+
+    def check_dir_len(self, path):
+        return len(os.listdir(path))
+
+    def check_if_continue(self, images_dir):
+        mask_dir = images_dir.replace('images', 'masks')
+        if os.path.exists(mask_dir) and os.path.exists(images_dir):
+            if self.check_dir_len(mask_dir) == self.check_dir_len(images_dir) and self.check_dir_len(mask_dir) != 0:
+                return True
+
+        return False
+
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
         source_video_frame_dir = video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'images')
+        if_continue = self.check_if_continue(source_video_frame_dir)
+        if if_continue:
+            print('----> skip the dir ', source_video_frame_dir)
+            return 
+
         self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
 
-        
         self.check_if_need_split()
+
+        
+
         self.load_frame_name()
         
         self.set_better_ref()
