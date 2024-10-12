@@ -14,7 +14,11 @@ checkpoints/*.pt
 __pycache__/
 *.py[cod]
 *$py.class
-
+./dataset/*
+./bird_frame/*
+./checkpoints/
+./custom_video_frames/
+./bird_result/
 # C extensions
 *.so
 
