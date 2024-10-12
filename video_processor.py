@@ -378,7 +378,7 @@ class VideoProcessor:
         frame_filename = f'frame{frame_idx:06d}.npz'
         frame_path = os.path.join(save_dir, frame_filename)
         # Prepare the data to save
-        image_size = (3, 128, 128)  # Example image size, adjust as needed 
+        image_size = ( 1, *self.video_info.resolution_wh)   # Example image size, adjust as needed 
         bbox_data = {'image_size': image_size}
         
         # Process detections
@@ -389,7 +389,8 @@ class VideoProcessor:
             bbox_data[class_id] = [x1, y1, x2, y2]
 
         # Save the data in a compressed format
-        np.savez_compressed(frame_path, **bbox_data)
+        data = {'arr_0': bbox_data}
+        np.savez_compressed(frame_path, **data)
 
         # Optionally, remove the original video file if it exists
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
