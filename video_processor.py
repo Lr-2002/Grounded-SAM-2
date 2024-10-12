@@ -7,7 +7,7 @@ import supervision as sv
 
 from pathlib import Path
 from tqdm import tqdm
-from PIL import Image
+from PIL import Image, ImageDraw
 from sam2.build_sam import build_sam2_video_predictor, build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor 
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
@@ -33,58 +33,89 @@ def calculate_iou(bbx1, bbx2):
     ratio2 = intersection / area2 if area2 > 0 else 0
     
     return ratio1, ratio2
+def calculate_area(bbox):
+    # Calculates the area of a single bounding box
+    x1, y1, x2, y2 = bbox
+    return (x2 - x1) * (y2 - y1)
 
-def filter_bboxes(bbx, labels, confidences, iou_threshold=0.8):
-    """过滤边界框，删除满足条件的边界框。"""
-    # 根据confidence从高到低排序
-    indices = np.argsort(confidences)[::-1]
-    bbx = bbx[indices]
-    labels = np.array(labels)[indices]
-    confidences = np.array(confidences)[indices]
+def update_bboxes(bboxes, labels, confidences, image_width, image_height):
+    height_threshold = 0.01 * image_height
+    width_threshold = 0.01 * image_width
+    agents = []
+    
+    # Find agents: bounding boxes close to any image border
+    for i, bbox in enumerate(bboxes):
+        x1, y1, x2, y2 = bbox
+        if (
+            x1 <= width_threshold or                # Close to left border
+            x2 >= (image_width - width_threshold) or # Close to right border
+            y1 <= height_threshold or               # Close to top border
+            y2 >= (image_height - height_threshold) # Close to bottom border
+        ):
+            agents.append(i)
+    # Filter agents based on IoU
 
-    to_delete = set()
-    for i in range(len(bbx)):
-        if i in to_delete:
-            continue
-        
-        current_bbx = bbx[i]
-        current_area = (current_bbx[2] - current_bbx[0]) * (current_bbx[3] - current_bbx[1])
-        
-        # 找到与当前bbx的IOU超过阈值的所有bbx
-        contained_bbx = []
-        for j in range(len(bbx)):
-            if i != j and j not in to_delete:
-                ratio1, ratio2 = calculate_iou(current_bbx, bbx[j])
-                if ratio1 > iou_threshold or ratio2 > iou_threshold:
-                    contained_bbx.append(bbx[j])
+    agents_to_remove = set()
+    for i in agents:
+        for j in range(len(bboxes)):
+            if i == j :
+                continue 
+            ious = calculate_iou(bboxes[i], bboxes[j]) 
+            if i != j and (ious[0]> 0.9 or ious[1] > 0.9):
+                agents_to_remove.add(i)
+                break
+    
+    # Calculate mean area of non-agent bounding boxes
+    non_agent_bboxes = [bbox for i, bbox in enumerate(bboxes) if i not in agents_to_remove]
+    non_agent_areas = [calculate_area(bbox) for bbox in non_agent_bboxes]
+    mean_area = np.mean(non_agent_areas) if non_agent_areas else 0
+    
+    # Remove non-agents that are too large
+    final_bboxes = []
+    final_labels = []
+    final_confidences = []
+    
+    for i, bbox in enumerate(bboxes):
+        if i not in agents_to_remove:
+            # Check if the area exceeds 4 times the mean area
+            area = calculate_area(bbox)
+            if (i in agents and i not in agents_to_remove) or  area <= 1 * mean_area:
+                final_bboxes.append(bbox)
+                final_labels.append(labels[i])
+                final_confidences.append(confidences[i])
+    
+    # Parameters to return
+    agents_remaining = bool(len(agents) - len(agents_to_remove))
+    num_bboxes = len(final_bboxes)
+    
+    return final_bboxes, final_labels, final_confidences, agents_remaining, num_bboxes
 
-        # 如果包含两个以上的bbx
-        if len(contained_bbx) >= 2:
-            # 计算平均面积
-            avg_area = np.mean([(bb[2] - bb[0]) * (bb[3] - bb[1]) for bb in contained_bbx])
-            large_bbx_found = any((bb[2] - bb[0]) * (bb[3] - bb[1]) > 2 * avg_area for bb in contained_bbx)
 
-            if large_bbx_found:
-                to_delete.add(i)  # 标记当前bbx删除
-
-    # 过滤掉要删除的边界框
-    filtered_bbx = np.array([bbx[i] for i in range(len(bbx)) if i not in to_delete])
-    filtered_labels = [labels[i] for i in range(len(labels)) if i not in to_delete]
-    filtered_confidences = [confidences[i] for i in range(len(confidences)) if i not in to_delete]
-
-    return filtered_bbx, filtered_labels, filtered_confidences
-
-def filte_big_box(boxes, labels, confidences,total_area) : 
+def filte_big_box(boxes, labels, confidences,total_area, w, h) : 
     assert boxes.shape[1] == 4 
     areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]) 
     mask =( areas  / total_area )  < 0.5
     filtered_boxes = boxes[mask]
     filtered_labels = [label for i, label in enumerate(labels) if mask[i]]
     filtered_confid = [conf for i, conf in enumerate(confidences) if mask[i]]
-    filtered_boxes, filtered_labels, filtered_confid = filter_bboxes(filtered_boxes, filtered_labels, filtered_confid)
+    
+    filtered_boxes, filtered_labels, filtered_confid, remain, num_len = update_bboxes(filtered_boxes, filtered_labels, filtered_confid, w, h)
 
-    return filtered_boxes, filtered_labels, filtered_confid
+    return filtered_boxes, filtered_labels, filtered_confid, remain, num_len
 
+def save_bbox_vis(bboxes, width, height, path="bbox_object"):
+    # Iterate over each bounding box and save as a PNG file
+    for i, bbox in enumerate(bboxes):
+        # Create a blank white image
+        img = Image.new('RGB', (width, height), color='white')
+        draw = ImageDraw.Draw(img)
+        
+        # Draw the bounding box
+        x1, y1, x2, y2 = bbox
+        draw.rectangle([x1, y1, x2, y2], outline='red', width=2)
+        
+        # Save the image with bounding box
+        img.save(f"saved_mask/{path}_{i}.png")
 
 def save_mask_vis(masks, path="mask_object"):
         # 遍历每个物体的掩码并保存为 PNG 文件
@@ -207,30 +238,38 @@ class VideoProcessor:
         return image, input_boxes, confidences, class_names
 
 
-    def set_better_ref(self):
-        stride = 10 if self.video_len < 100 else self.video_len // 10
+    def set_better_ref(self, stride=3):
+        stride = stride if self.video_len < stride * 10 else self.video_len // 10
         max_num = 0 
-        
+        flag = None
         for idx in range(0, self.video_len, stride):
             img_path = os.path.join(self.source_video_frame_dir, self.frame_names[idx])
-            _, boxes, _, _  = self.gdino_inner_process(img_path)
-            boxes_len = boxes.shape[0]
-            if boxes_len > max_num:
-                max_num = boxes_len 
+            img, input_boxes, class_names, confidences  = self.gdino_inner_process(img_path)
+            w, h = self.video_info.resolution_wh
+            input_boxes, class_names, confidences, remain, num_len = filte_big_box(input_boxes, class_names, confidences, w * h, w,h)
+            if remain and num_len > max_num:
+                flag = remain
+                max_num = num_len
                 self.set_ref_idx(idx)
+        if flag== None :
+            self.set_ref_idx(-1)
+        print('the max num is ', max_num)
 
 
     # prompt grounding dino to get the box coordinates on specific frame
     def gdino_process(self):
         assert hasattr(self, 'ann_frame_idx')
+        if self.ann_frame_idx == -1:
+            return False
         img_path = os.path.join(self.source_video_frame_dir, self.frame_names[self.ann_frame_idx])
         image, input_boxes, confidences, class_names = self.gdino_inner_process(img_path)
 
         converted_image = np.array(image.convert("RGB"))
         h, w = converted_image.shape[:2]
-        self.input_boxes, self.class_names, self.confidences = filte_big_box(input_boxes, class_names, confidences, w * h)
+        self.input_boxes, self.class_names, self.confidences,_, _ = filte_big_box(input_boxes, class_names, confidences, w * h, w,h)
         self.objects = self.class_names
         self.converted_image = converted_image
+        return True
     def sam2_image_process(self):
 
         # prompt SAM image predictor to get the mask for the object
@@ -422,25 +461,26 @@ class VideoProcessor:
         
         self.set_better_ref()
 
-        self.gdino_process()
+        remain = self.gdino_process()
+        if remain:
+            self.sam2_image_process()
 
-        self.sam2_image_process()
+            self.prepare_sam2_video()
 
-        self.prepare_sam2_video()
-
-        self.propagate_in_video()
+            self.propagate_in_video()
 
 
-        self.vis_and_save()
-
+            self.vis_and_save()
+        else: 
+            print('-----> deparcted video', video_path)
 if __name__=='__main__':
     process_model = VideoProcessor(save_video=True, re_split=True)
-    dir_path = './dataset/videos/test/'
+    dir_path = './dataset/videos/train/'
     videos = os.listdir(dir_path)
     cnt = 0
     from tqdm import tqdm
     for video in tqdm(videos):
         cnt +=1 
         video_path =  dir_path + video + '/rgb.mp4'
-        process_model.update_and_process(video_path)
+        process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
     #process_model.update_and_process('./test_videos/004803_0_0.mp4')
