@@ -86,7 +86,7 @@ def filte_big_box(boxes, labels, confidences,total_area) :
     return filtered_boxes, filtered_labels, filtered_confid
 
 
-def save_mask(masks, path="mask_object"):
+def save_mask_vis(masks, path="mask_object"):
         # 遍历每个物体的掩码并保存为 PNG 文件
         for i, mask in enumerate(masks):
             # 将掩码转换为图片格式 (0, 255)
@@ -96,7 +96,7 @@ def save_mask(masks, path="mask_object"):
             img.save(f"{path}_{i}.png")
 
 class VideoProcessor:
-    def __init__(self, save_mask=False, re_split=False) -> None:
+    def __init__(self, save_video=True, save_mask=True, save_mask_vis=False, re_split=False) -> None:
         self.model_id = "IDEA-Research/grounding-dino-tiny"
         self.video_path = "test.mp4"
         self.text_prompt = "object."
@@ -128,7 +128,9 @@ class VideoProcessor:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id).to(self.device)
-        self.save_mask = save_mask
+        self.save_mask_vis = save_mask_vis
+        self.need_save_mask = save_mask
+        self.save_video = save_video
         self.re_split = re_split
 
     def split_video(self):
@@ -136,7 +138,7 @@ class VideoProcessor:
         Custom video input directly using video files
         """
         video_info = sv.VideoInfo.from_video_path(self.video_path)  # get video info
-        print(video_info)
+        self.video_info = video_info
         frame_generator = sv.get_video_frames_generator(self.video_path, stride=1, start=0, end=None)
 
         # saving video to frames
@@ -181,7 +183,6 @@ class VideoProcessor:
 
         return frame_names
     def set_ref_idx(self, idx=0):
-        print('set frame idx to', idx)
         self.ann_frame_idx = idx  # the frame index we interact with
 
     def gdino_inner_process(self,img_path):
@@ -227,9 +228,7 @@ class VideoProcessor:
 
         converted_image = np.array(image.convert("RGB"))
         h, w = converted_image.shape[:2]
-        print('before processed', input_boxes.shape)
         self.input_boxes, self.class_names, self.confidences = filte_big_box(input_boxes, class_names, confidences, w * h)
-        print(input_boxes.shape)
         self.objects = self.class_names
         self.converted_image = converted_image
     def sam2_image_process(self):
@@ -239,7 +238,6 @@ class VideoProcessor:
 
         # process the detection results
 
-        print(self.objects)
         # prompt SAM 2 image predictor to get the mask for the object
         self.image_masks, self.image_scores, self.image_logits = self.image_predictor.predict(
             point_coords=None,
@@ -250,8 +248,8 @@ class VideoProcessor:
         # convert the mask shape to (n, H, W)
         if self.image_masks.ndim == 4:
             self.image_masks = self.image_masks.squeeze(1)
-        if self.save_mask:
-            save_mask(self.image_masks)
+        if self.save_mask_vis:
+            save_mask_vis(self.image_masks)
 
     def prepare_sam2_video(self):
 
@@ -302,15 +300,19 @@ class VideoProcessor:
     def propagate_in_video(self):
         """
         Step 4: Propagate the video predictor to get the segmentation results for each frame
+        return self.video_segments is 
+        frame_idx : obj_id : masks 
         """
         # prev_seg = 
         self.video_segments = {}  # self.video_segments contains the per-frame segmentation results
         reverse = self.ann_frame_idx != 0 
+
         for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=reverse):
             self.video_segments[out_frame_idx] = {
                 out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
                 for i, out_obj_id in enumerate(out_obj_ids)
             }
+        return self.video_segments
     def vis_and_save(self):
         """
         Step 5: Visualize the segment results across the video and save them
@@ -319,7 +321,6 @@ class VideoProcessor:
             os.makedirs(self.save_tracking_results_dir)
 
         ID_TO_OBJECTS = {i: obj for i, obj in enumerate(self.objects, start=1)}
-        # print(self.video_segments.items())
         for frame_idx, segments in self.video_segments.items():
             img = cv2.imread(os.path.join(self.source_video_frame_dir, self.frame_names[frame_idx]))
             
@@ -332,20 +333,25 @@ class VideoProcessor:
                 mask=masks, # (n, h, w)
                 class_id=np.array(object_ids, dtype=np.int32),
             )
-            box_annotator = sv.BoxAnnotator()
-            annotated_frame = box_annotator.annotate(scene=img.copy(), detections=detections)
-            label_annotator = sv.LabelAnnotator()
-            annotated_frame = label_annotator.annotate(annotated_frame, detections=detections, labels=[ID_TO_OBJECTS[i] for i in object_ids])
-            mask_annotator = sv.MaskAnnotator()
-            annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=detections)
-            cv2.imwrite(os.path.join(self.save_tracking_results_dir, f"annotated_frame_{frame_idx:05d}.jpg"), annotated_frame)
+            if self.need_save_mask:
+                self.save_mask(detections, frame_idx)
+
+
+            if self.save_video:
+                box_annotator = sv.BoxAnnotator()
+                annotated_frame = box_annotator.annotate(scene=img.copy(), detections=detections)
+                label_annotator = sv.LabelAnnotator()
+                annotated_frame = label_annotator.annotate(annotated_frame, detections=detections, labels=[ID_TO_OBJECTS[i] for i in object_ids])
+                mask_annotator = sv.MaskAnnotator()
+                annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=detections)
+                cv2.imwrite(os.path.join(self.save_tracking_results_dir, f"annotated_frame_{frame_idx:05d}.jpg"), annotated_frame)
 
 
         """
         Step 6: Convert the annotated frames to video
         """
-
-        create_video_from_images(self.save_tracking_results_dir, self.output_video_path)
+        if self.save_video:
+            create_video_from_images(self.save_tracking_results_dir, self.output_video_path)
     def update_files(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
         self.video_path = video_path
         self.text_prompt = text_prompt
@@ -354,12 +360,42 @@ class VideoProcessor:
         self.save_tracking_results_dir = save_tracking_results_dir
 
         import shutil
-        shutil.rmtree(save_tracking_results_dir)
+        if os.path.exists(save_tracking_results_dir):
+            shutil.rmtree(save_tracking_results_dir)
         
-        print('updated video path is ' , self.video_path)
-    
+ 
+
+
+    def save_mask(self, detections, frame_idx):
+
+        # Construct the new save directory for masks
+        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks')
+        
+        # Ensure the directory exists
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Construct the filename for the frame
+        frame_filename = f'frame{frame_idx:06d}.npz'
+        frame_path = os.path.join(save_dir, frame_filename)
+        # Prepare the data to save
+        image_size = (3, 128, 128)  # Example image size, adjust as needed 
+        bbox_data = {'image_size': image_size}
+        
+        # Process detections
+        for idx, (bbox, class_id) in enumerate(zip(detections.xyxy, detections.class_id)):
+            # Each bbox is expected to be in the format [x1, y1, x2, y2]
+            x1, y1, x2, y2 = bbox
+            class_id = str(class_id)
+            bbox_data[class_id] = [x1, y1, x2, y2]
+
+        # Save the data in a compressed format
+        np.savez_compressed(frame_path, **bbox_data)
+
+        # Optionally, remove the original video file if it exists
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
+        source_video_frame_dir = video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'images')
         self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
+
         
         self.check_if_need_split()
         self.load_frame_name()
@@ -374,16 +410,17 @@ class VideoProcessor:
 
         self.propagate_in_video()
 
+
         self.vis_and_save()
 
 if __name__=='__main__':
-    process_model = VideoProcessor(re_split=True)
-    videos = os.listdir('./test_videos')
+    process_model = VideoProcessor(save_video=True, re_split=True)
+    dir_path = './dataset/videos/test/'
+    videos = os.listdir(dir_path)
     cnt = 0
-    for video in videos:
+    from tqdm import tqdm
+    for video in tqdm(videos):
         cnt +=1 
-        if cnt > 5 :
-            break
-        video_path = './test_videos/' + video
-        process_model.update_and_process(video_path, 'output_video/'+ video)
+        video_path =  dir_path + video + '/rgb.mp4'
+        process_model.update_and_process(video_path)
     #process_model.update_and_process('./test_videos/004803_0_0.mp4')
