@@ -14,11 +14,11 @@ checkpoints/*.pt
 __pycache__/
 *.py[cod]
 *$py.class
-./dataset/*
-./bird_frame/*
-./checkpoints/
-./custom_video_frames/
-./bird_result/
+dataset/*
+bird_frame/*
+checkpoints/
+custom_video_frames/
+bird_result/
 # C extensions
 *.so
 
@@ -149,3 +149,28 @@ dmypy.json
 outputs/
 
 .idea/
+object_frame
+object_frame_n
+object_result
+object_result_n
+output_dir
+output_video
+tmp/source_video_frame
+tracking_results
+~/.config/nvim/.backup
+all_7-th.mp4
+bird.mp4
+hippopotamus_tracking_demo.mp4
+lazygit
+lazygit.tar.gz
+mask_object_0.png
+mask_object_1.png
+mask_object_2.png
+mask_object_3.png
+mask_object_4.png
+mask_object_5.png
+mask_object_6.png
+mask_object_7.png
+mask_object_8.png
+object.mp4
+processed_video.mp4

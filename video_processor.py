@@ -474,7 +474,7 @@ class VideoProcessor:
         else: 
             print('-----> deparcted video', video_path)
 if __name__=='__main__':
-    process_model = VideoProcessor(save_video=True, re_split=True)
+    process_model = VideoProcessor(save_video=False, re_split=True)
     dir_path = './dataset/videos/train/'
     videos = os.listdir(dir_path)
     cnt = 0
@@ -482,5 +482,6 @@ if __name__=='__main__':
     for video in tqdm(videos):
         cnt +=1 
         video_path =  dir_path + video + '/rgb.mp4'
-        process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
+        # process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
+        process_model.update_and_process(video_path)
     #process_model.update_and_process('./test_videos/004803_0_0.mp4')
