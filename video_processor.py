@@ -344,13 +344,20 @@ class VideoProcessor:
         """
         # prev_seg = 
         self.video_segments = {}  # self.video_segments contains the per-frame segmentation results
-        reverse = self.ann_frame_idx != 0 
 
-        for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=reverse):
+        for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=False):
             self.video_segments[out_frame_idx] = {
                 out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
                 for i, out_obj_id in enumerate(out_obj_ids)
             }
+        reverse = self.ann_frame_idx != 0 
+        if reverse:
+            for out_frame_idx, out_obj_ids, out_mask_logits in self.video_predictor.propagate_in_video(self.inference_state,reverse=reverse):
+                self.video_segments[out_frame_idx] = {
+                    out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                    for i, out_obj_id in enumerate(out_obj_ids)
+                }
+
         return self.video_segments
     def vis_and_save(self):
         """
@@ -450,7 +457,7 @@ class VideoProcessor:
         if if_continue:
             print('----> skip the dir ', source_video_frame_dir)
             return 
-
+        # print('processing the video', video_path)
         self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
 
         self.check_if_need_split()
@@ -472,7 +479,7 @@ class VideoProcessor:
 
             self.vis_and_save()
         else: 
-            print('-----> deparcted video', video_path)
+            print('-----> deparched video', video_path)
 if __name__=='__main__':
     process_model = VideoProcessor(save_video=False, re_split=True)
     dir_path = './dataset/videos/train/'
