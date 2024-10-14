@@ -1,6 +1,8 @@
 import numpy as np
 import re
 import os
+import shutil
+from tqdm import tqdm
 
     # Function to track objects in subsequent frames
 def track_objects(previous_frame, current_frame, tracked_objects, frame_index):
@@ -20,22 +22,59 @@ def track_objects(previous_frame, current_frame, tracked_objects, frame_index):
                 'frame_indices': [frame_index]
             }
 
-def get_frame_objects(frame):
+def calculate_area(points):
+    x1 , y1 ,x2, y2 = points
+    return (x2-x1) * (y2-y1)
+
+def get_frame_objects(frame, filte_agent=True):
     ans = {}
+    mean_area= 0 
     for obj_id in frame.keys():
         if obj_id == 'image_size': 
             continue 
         sum_obj = np.sum(frame[str(obj_id)])
         if sum_obj == 0 :
             continue 
+            
         obj_id = int(obj_id)
+        points = frame[str(obj_id)]
+        area = calculate_area(points)
+        # print(area)
+
+        if filte_agent:
+            if area> 6000:
+                continue 
+        mean_area += area
         ans[obj_id] = {
             'positions': [frame[str(obj_id)]],  # Store the initial position
             'frame_indices': [0]  # Store the frame index
         }
-
+    #print('mean_area is ', mean_area/len(ans.keys()))
     return ans   
 
+def load_arr(filepath):
+    data = np.load(filepath, allow_pickle=True)
+    frame_data = data['arr_0'].item()  # Assuming 'arr_0' contains the relevant data
+
+    return frame_data
+def check_first_frame(mask_dir):
+    filepath =  os.path.join(mask_dir, 'frame000000.npz')
+    if os.path.exists(filepath):
+        data = load_arr(filepath)
+        obj_list = get_frame_objects(data).keys()
+        obj_num = len(obj_list)
+        if obj_num ==8:
+            # print('mask_dir' , mask_dir)
+            return True 
+    return False
+
+def copy_available_data(mask_dir, video_id, store_dir='./no_hide/', ori_dir=None):
+    if check_first_frame(mask_dir):
+        if ori_dir is None :
+            video_dir = os.path.dirname(mask_dir)
+        else: 
+            video_dir = os.path.join(ori_dir, video_id, 'images/00000.jpg')
+        shutil.copy(video_dir, os.path.join(store_dir, str(video_id)+'.jpg'))
 
 # Directory containing the mask files
 def object_num_metric(mask_dir):
@@ -45,11 +84,9 @@ def object_num_metric(mask_dir):
     sorted_filenames = sorted(sorted_dir, key=lambda x: int(re.search(r'\d+', x).group()))
     itt = 0
     for filename in sorted_filenames:
-        if filename.endswith('.npz'):
-            
+        if '.npz' in filename:
             filepath = os.path.join(mask_dir, filename)
-            data = np.load(filepath, allow_pickle=True)
-            frame_data[itt] = data['arr_0'].item()  # Assuming 'arr_0' contains the relevant data
+            frame_data[itt] = load_arr(filepath)
             itt +=1 
 
     # Step 2: Track objects across frames
@@ -65,8 +102,9 @@ def object_num_metric(mask_dir):
     
 if __name__=='__main__':
 
-    mask_dir = './dataset/mask_data/test/'  # Update this to your mask directory
-    for i in os.listdir(mask_dir):
+    mask_dir = './dataset/mask_data/train/'  # Update this to your mask directory
+    for i in tqdm(os.listdir(mask_dir)):
         test_dir = os.path.join(mask_dir, i, 'masks')
-        print(test_dir)
-        object_num_metric(test_dir)
+        # check_first_frame(test_dir)
+        copy_available_data(test_dir, i, ori_dir=mask_dir)
+        # object_num_metric(test_dir)
