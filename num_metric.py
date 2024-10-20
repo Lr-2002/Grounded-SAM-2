@@ -127,10 +127,7 @@ def find_delta_ids(id1, id2):
     delta_list = list(set(id1) - set(id2))
     delta_from_previous = [dd for dd in delta_list if dd in id1]
     return delta_from_previous
-def check_missing(pre_frame, this_frame):
-    pre_ids = pre_frame.keys()
-    this_ids = this_frame.keys()
-    missing_id = find_delta_ids(pre_ids, this_ids)
+def check_missing(pre_frame, this_frame, missing_id):
     miss, hide = 0, 0
     if len(missing_id) >= 1 : 
         
@@ -141,7 +138,7 @@ def check_missing(pre_frame, this_frame):
                 alter = alter['positions']
                 iou = calculate_iou(miss_bbx, alter)
                 # print('iou is ', iou)
-                if iou > 0.7:
+                if iou > 0.6:
                     hide += 1 
                     break
         miss = len(missing_id) - hide
@@ -150,18 +147,27 @@ def check_missing(pre_frame, this_frame):
 
 
 
-def update_metrics(pre_frame, this_frame):
+def update_metrics(pre_frame, this_frame, history_ids):
     pre_len = len(pre_frame.keys())
     this_len = len(this_frame.keys())
-    miss, hide = check_missing(pre_frame, this_frame)
-    
+    pre_ids = pre_frame.keys()
+    this_ids = this_frame.keys()
+    missing_id = find_delta_ids(pre_ids, this_ids)
+    delta_addon_id = find_delta_ids(this_ids, pre_ids)
+    addon = 0
+    for i in delta_addon_id: 
+        if i not in history_ids:
+            addon+=1 
+            history_ids.add(i)
+    miss, hide = check_missing(pre_frame, this_frame, missing_id)
+
     # if this_len < pre_len:
     #     assert hide + miss + this_len == pre_len, f'{hide, miss, this_len, pre_len}'
-    return {'hide': hide, 'miss': miss}
+    return {'hide': hide, 'miss': miss, 'addon':addon}, history_ids
 
 # Directory containing the mask files
 def object_num_metric(mask_dir):
-    # Step 1: Load all frame data
+    # Step 1: Load all frame data, history_ids
     frame_data = {} 
     sorted_dir = [x for x in os.listdir(mask_dir) if x.endswith('npz')]
     def get_frame_id(name):
@@ -189,12 +195,16 @@ def object_num_metric(mask_dir):
     objs_list = []
     miss_items = 0 
     hide_items = 0
+    addon_items = 0
     reference_id = None 
+    history_ids = set()
     for frame_id, frame in enumerate(frame_data.values()):
         
         objs = get_frame_objects(frame, filte_agent=False, reference_id=reference_id)
         if frame_id == 0 : 
             reference_id = objs.keys()
+            history_ids.update(set(reference_id))
+            # print(history_ids)
         objs_list.append(objs)
         
         obj_num_list.append(len(objs.keys()))
@@ -207,13 +217,14 @@ def object_num_metric(mask_dir):
                 
                # update_metrics(prev_frame, this_frame)
                 # print('now processing the id', frame_id)
-                miss_dict = update_metrics(prev_frame, this_frame)
+                miss_dict, history_ids= update_metrics(prev_frame, this_frame, history_ids)
                 # print(miss_dict)
                 miss_items += miss_dict['miss']
                 hide_items += miss_dict['hide']
+                addon_items += miss_dict['addon']
     # print(obj_num_list)
-    if miss_items >= 1 or hide_items >=  1 : 
-        print(miss_items, hide_items, mask_dir, mask_dir.split('/')[-1])
+    if miss_items +  hide_items + addon_items != 0 : 
+        print(miss_items, hide_items, addon_items, mask_dir, mask_dir.split('/')[-1])
 if __name__=='__main__':
 
     # mask_dir = './dataset/mask_data/val/'  # Update this to your mask directory
