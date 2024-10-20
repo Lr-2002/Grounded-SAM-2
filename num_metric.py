@@ -201,11 +201,11 @@ def object_num_metric(mask_dir):
         if frame_id >=1   : 
             prev_len = obj_num_list[frame_id-1]
             this_len = obj_num_list[frame_id]
-            if prev_len != this_len: 
-
-                prev_frame = objs_list[frame_id-1]
-                this_frame = objs_list[frame_id]
-                # update_metrics(prev_frame, this_frame)
+            prev_frame = objs_list[frame_id-1]
+            this_frame = objs_list[frame_id]
+            if prev_len != this_len or len(find_delta_ids(prev_frame.keys(), this_frame.keys())): 
+                
+               # update_metrics(prev_frame, this_frame)
                 # print('now processing the id', frame_id)
                 miss_dict = update_metrics(prev_frame, this_frame)
                 # print(miss_dict)
