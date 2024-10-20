@@ -359,7 +359,7 @@ class VideoProcessor:
                 }
 
         return self.video_segments
-    def vis_and_save(self):
+    def vis_and_save(self, mask_save_dir=None):
         """
         Step 5: Visualize the segment results across the video and save them
         """
@@ -380,7 +380,7 @@ class VideoProcessor:
                 class_id=np.array(object_ids, dtype=np.int32),
             )
             if self.need_save_mask:
-                self.save_mask(detections, frame_idx)
+                self.save_mask(detections, frame_idx, save_dir=mask_save_dir)
 
 
             if self.save_video:
@@ -412,11 +412,11 @@ class VideoProcessor:
  
 
 
-    def save_mask(self, detections, frame_idx):
+    def save_mask(self, detections, frame_idx, save_dir=None):
 
         # Construct the new save directory for masks
-        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks')
-        
+        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks') if save_dir is None else save_dir
+        # print('in save_mask function', save_dir)
         # Ensure the directory exists
         os.makedirs(save_dir, exist_ok=True)
 
@@ -451,9 +451,9 @@ class VideoProcessor:
 
         return False
 
-    def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
-        source_video_frame_dir = video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'images')
-        if_continue = self.check_if_continue(source_video_frame_dir)
+    def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
+        source_video_frame_dir = video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'images') if '0-th' not in video_path else source_video_frame_dir
+        if_continue = self.check_if_continue(source_video_frame_dir) if split_for_metric is False else False 
         if if_continue:
             print('----> skip the dir ', source_video_frame_dir)
             return 
@@ -477,18 +477,34 @@ class VideoProcessor:
             self.propagate_in_video()
 
 
-            self.vis_and_save()
+            self.vis_and_save(mask_save_dir=mask_save_dir)
         else: 
             print('-----> deparched video', video_path)
 if __name__=='__main__':
-    process_model = VideoProcessor(save_video=False, re_split=True)
-    dir_path = './dataset/videos/train/'
+    process_model = VideoProcessor(save_video=True, re_split=True)
+    # dir_path = './dataset/videos/train/'
+    # #
+    # videos = os.listdir(dir_path)
+    # cnt = 0
+    # from tqdm import tqdm
+    # for video in tqdm(videos):
+    #     cnt +=1 
+    #     video_path =  dir_path + video + '/rgb.mp4'
+    #     # process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
+    #     process_model.update_and_process(video_path)
+    # #process_model.update_and_process('./test_videos/004803_0_0.mp4')
+
+    dir_path = '/home/lr-2002/code/IRASim/generate_video'
     videos = os.listdir(dir_path)
-    cnt = 0
-    from tqdm import tqdm
     for video in tqdm(videos):
-        cnt +=1 
-        video_path =  dir_path + video + '/rgb.mp4'
-        # process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
-        process_model.update_and_process(video_path)
-    #process_model.update_and_process('./test_videos/004803_0_0.mp4')
+        if video.endswith('.mp4'):
+            video_id = video.split('_')[0]
+            if len(video_id) != 6 :
+                continue 
+            mask_dir = os.path.join(dir_path, str(video_id) + '/')
+            if not os.path.exists(mask_dir):
+                os.mkdir(mask_dir)
+            print('video dir is ', video_id, 'mask_dir is', mask_dir)
+            process_model.update_and_process(video_path=os.path.join(dir_path, video), mask_save_dir=mask_dir, save_tracking_results_dir=os.path.join(dir_path, video_id, 'annotate'), split_for_metric=True)
+            
+

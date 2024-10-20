@@ -26,7 +26,16 @@ def calculate_area(points):
     x1 , y1 ,x2, y2 = points
     return (x2-x1) * (y2-y1)
 
-def get_frame_objects(frame, filte_agent=True):
+def get_frame_objects(frame, filte_agent=True, reference_id=None):
+    """
+    return objests: 
+    - obj id 
+        - position : numpy 4  for x1 , y1, x2, y2 
+        - frame_indices 
+
+
+
+    """
     ans = {}
     mean_area= 0 
     for obj_id in frame.keys():
@@ -43,7 +52,10 @@ def get_frame_objects(frame, filte_agent=True):
 
         if filte_agent:
             if area> 6000:
-                continue 
+                continue    
+        if reference_id is not None:
+            if obj_id not in  reference_id:
+                continue
         mean_area += area
         ans[obj_id] = {
             'positions': [frame[str(obj_id)]],  # Store the initial position
@@ -68,6 +80,35 @@ def check_first_frame(mask_dir):
             return True 
     return False
 
+def calculate_iou(a, b):
+    a = a[0]
+    b = b[0]
+    # Unpack the bounding boxes
+
+    x_min_a, y_min_a, x_max_a, y_max_a = a
+    x_min_b, y_min_b, x_max_b, y_max_b = b
+
+    # Calculate the coordinates of the intersection rectangle
+    x_min_intersection = max(x_min_a, x_min_b)
+    y_min_intersection = max(y_min_a, y_min_b)
+    x_max_intersection = min(x_max_a, x_max_b)
+    y_max_intersection = min(y_max_a, y_max_b)
+
+    # Calculate the area of intersection
+    intersection_width = max(0, x_max_intersection - x_min_intersection)
+    intersection_height = max(0, y_max_intersection - y_min_intersection)
+    intersection_area = intersection_width * intersection_height
+
+    # Calculate the area of each bounding box
+    area_a = (x_max_a - x_min_a) * (y_max_a - y_min_a)
+    area_b = (x_max_b - x_min_b) * (y_max_b - y_min_b)
+
+    # Calculate the IoU
+    iou = intersection_area / area_a if area_a > 0 else 0
+
+    return iou
+
+
 def copy_available_data(mask_dir, video_id, store_dir='./no_hide/', ori_dir=None):
     if check_first_frame(mask_dir):
         if ori_dir is None :
@@ -76,12 +117,58 @@ def copy_available_data(mask_dir, video_id, store_dir='./no_hide/', ori_dir=None
             video_dir = os.path.join(ori_dir, video_id, 'images/00000.jpg')
         shutil.copy(video_dir, os.path.join(store_dir, str(video_id)+'.jpg'))
 
+def find_delta_ids(id1, id2):
+    """ 
+    will only count all the missing part from the first frame 
+
+    """
+    # print(set(id1), set(id2))
+    delta_list = list(set(id1) - set(id2))
+    delta_from_previous = [dd for dd in delta_list if dd in id1]
+    return delta_from_previous
+def check_missing(pre_frame, this_frame):
+    pre_ids = pre_frame.keys()
+    this_ids = this_frame.keys()
+    missing_id = find_delta_ids(pre_ids, this_ids)
+    miss, hide = 0, 0
+    if len(missing_id) >= 1 : 
+        
+        # print(missing_id)
+        for miss in missing_id:
+            miss_bbx = pre_frame[miss]['positions']
+            for alter_id,  alter in this_frame.items(): 
+                alter = alter['positions']
+                iou = calculate_iou(miss_bbx, alter)
+                if iou > 0.7:
+                    hide += 1 
+                    break
+        miss = len(missing_id) - hide
+    assert miss + hide == len(missing_id)
+    return miss, hide
+
+
+
+def update_metrics(pre_frame, this_frame):
+    pre_len = len(pre_frame.keys())
+    this_len = len(this_frame.keys())
+    miss, hide = check_missing(pre_frame, this_frame)
+    
+    # if this_len < pre_len:
+    #     assert hide + miss + this_len == pre_len, f'{hide, miss, this_len, pre_len}'
+    return {'hide': hide, 'miss': miss}
+
 # Directory containing the mask files
 def object_num_metric(mask_dir):
     # Step 1: Load all frame data
-    frame_data = {}
-    sorted_dir = os.listdir(mask_dir)
-    sorted_filenames = sorted(sorted_dir, key=lambda x: int(re.search(r'\d+', x).group()))
+    frame_data = {} 
+    sorted_dir = [x for x in os.listdir(mask_dir) if x.endswith('npz')]
+    def get_frame_id(name):
+        idd = name.split('.')[0]
+        idd = int(idd[5:])
+        return idd
+    sorted_filenames = sorted(sorted_dir, key=lambda x: get_frame_id(x))
+    if len(sorted_filenames) == 0 :
+        return 
     itt = 0
     for filename in sorted_filenames:
         if '.npz' in filename:
@@ -92,19 +179,50 @@ def object_num_metric(mask_dir):
     # Step 2: Track objects across frames
     # Initialize a dictionary to hold the tracking information
     tracked_objects = {}
-
+    
     # Assume the first frame is the reference for tracking
     first_frame = frame_data[0]
     # Initialize tracked objects with the first frame
-    for frame in frame_data.values():
-        obj_list = get_frame_objects(frame).keys()
-        print(obj_list)
+    obj_num_list = []
+    objs_list = []
+    miss_items = 0 
+    reference_id = None 
+    for frame_id, frame in enumerate(frame_data.values()):
+        
+        objs = get_frame_objects(frame, reference_id=reference_id)
+        if frame_id == 0 : 
+            reference_id = objs.keys()
+        objs_list.append(objs)
+        
+        obj_num_list.append(len(objs.keys()))
+        if frame_id >=1   : 
+            prev_len = obj_num_list[frame_id-1]
+            this_len = obj_num_list[frame_id]
+            if prev_len != this_len: 
+
+                prev_frame = objs_list[frame_id-1]
+                this_frame = objs_list[frame_id]
+                # update_metrics(prev_frame, this_frame)
+                miss_dict = update_metrics(prev_frame, this_frame)
+                print(miss_dict)
+                # miss_items += miss_dict['miss']
+    # print(obj_num_list)
     
 if __name__=='__main__':
 
-    mask_dir = './dataset/mask_data/train/'  # Update this to your mask directory
-    for i in tqdm(os.listdir(mask_dir)):
-        test_dir = os.path.join(mask_dir, i, 'masks')
-        # check_first_frame(test_dir)
-        copy_available_data(test_dir, i, ori_dir=mask_dir)
-        # object_num_metric(test_dir)
+    # mask_dir = './dataset/mask_data/val/'  # Update this to your mask directory
+    # for i in tqdm(os.listdir(mask_dir)):
+    #     test_dir = os.path.join(mask_dir, i, 'masks')
+    #     # check_first_frame(test_dir)
+    #     copy_available_data(test_dir, i, ori_dir=mask_dir)
+    mask_dir = '/home/lr-2002/code/IRASim/generate_video/'  # Update this to your mask directory
+    for video in tqdm(os.listdir(mask_dir)):
+        path = os.path.join(mask_dir, video)
+        if os.path.isdir(path):
+
+            # test_dir = os.path.join(mask_dir, i, 'masks')
+
+            test_dir = path
+            # check_first_frame(test_dir)
+            # copy_available_data(test_dir, i, ori_dir=mask_dir)
+            object_num_metric(test_dir)
