@@ -84,7 +84,8 @@ def calculate_iou(a, b):
     a = a[0]
     b = b[0]
     # Unpack the bounding boxes
-
+    
+    # print(a, b ) 
     x_min_a, y_min_a, x_max_a, y_max_a = a
     x_min_b, y_min_b, x_max_b, y_max_b = b
 
@@ -139,6 +140,7 @@ def check_missing(pre_frame, this_frame):
             for alter_id,  alter in this_frame.items(): 
                 alter = alter['positions']
                 iou = calculate_iou(miss_bbx, alter)
+                # print('iou is ', iou)
                 if iou > 0.7:
                     hide += 1 
                     break
@@ -186,10 +188,11 @@ def object_num_metric(mask_dir):
     obj_num_list = []
     objs_list = []
     miss_items = 0 
+    hide_items = 0
     reference_id = None 
     for frame_id, frame in enumerate(frame_data.values()):
         
-        objs = get_frame_objects(frame, reference_id=reference_id)
+        objs = get_frame_objects(frame, filte_agent=False, reference_id=reference_id)
         if frame_id == 0 : 
             reference_id = objs.keys()
         objs_list.append(objs)
@@ -203,11 +206,14 @@ def object_num_metric(mask_dir):
                 prev_frame = objs_list[frame_id-1]
                 this_frame = objs_list[frame_id]
                 # update_metrics(prev_frame, this_frame)
+                # print('now processing the id', frame_id)
                 miss_dict = update_metrics(prev_frame, this_frame)
-                print(miss_dict)
-                # miss_items += miss_dict['miss']
+                # print(miss_dict)
+                miss_items += miss_dict['miss']
+                hide_items += miss_dict['hide']
     # print(obj_num_list)
-    
+    if miss_items >= 1 or hide_items >=  1 : 
+        print(miss_items, hide_items, mask_dir, mask_dir.split('/')[-1])
 if __name__=='__main__':
 
     # mask_dir = './dataset/mask_data/val/'  # Update this to your mask directory
@@ -216,8 +222,10 @@ if __name__=='__main__':
     #     # check_first_frame(test_dir)
     #     copy_available_data(test_dir, i, ori_dir=mask_dir)
     mask_dir = '/home/lr-2002/code/IRASim/generate_video/'  # Update this to your mask directory
-    for video in tqdm(os.listdir(mask_dir)):
+    all_dirs = os.listdir
+    for video in tqdm(sorted(os.listdir(mask_dir))):
         path = os.path.join(mask_dir, video)
+        # input('next?')
         if os.path.isdir(path):
 
             # test_dir = os.path.join(mask_dir, i, 'masks')
