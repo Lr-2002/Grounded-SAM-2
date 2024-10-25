@@ -421,11 +421,17 @@ class VideoProcessor:
         if os.path.exists(save_tracking_results_dir):
             shutil.rmtree(save_tracking_results_dir)
     def makedir(self, paths):
-        path_parts = paths.split('/')
+        if paths[0] != '/':
+            path_parts = paths.split('/')
 
-        current_path = ''
-
+            current_path = ''
+        else :
+            path_parts = paths.split('/')[1:]
+            current_path='/'
         for part in path_parts:
+            print('part', part)
+            if part =='':
+                continue 
             current_path = os.path.join(current_path, part)
             if not os.path.exists(current_path):
                 os.makedirs(current_path)
@@ -515,7 +521,7 @@ class VideoProcessor:
             print('-----> deparched video', video_path)
 if __name__=='__main__':
     process_model = VideoProcessor(save_video=True, re_split=True)
-    dir_path = './dataset/videos/train/'
+    dir_path = '/ssd/opensource_robotdata/languagetable/videos/train/'
     #
     videos = os.listdir(dir_path)
     cnt = 0
