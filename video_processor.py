@@ -1,4 +1,5 @@
 import os
+from collections import OrderedDict
 import re
 import cv2
 import torch
@@ -127,7 +128,7 @@ def save_mask_vis(masks, path="mask_object"):
             img.save(f"{path}_{i}.png")
 
 class VideoProcessor:
-    def __init__(self, save_video=True, save_mask=True, save_mask_vis=False, re_split=False) -> None:
+    def __init__(self, save_video=True, save_bbox=True, save_mask_vis=False, re_split=False) -> None:
         self.model_id = "IDEA-Research/grounding-dino-tiny"
         self.video_path = "test.mp4"
         self.text_prompt = "object."
@@ -160,7 +161,7 @@ class VideoProcessor:
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id).to(self.device)
         self.save_mask_vis = save_mask_vis
-        self.need_save_mask = save_mask
+        self.need_save_mask = save_bbox
         self.save_video = save_video
         self.re_split = re_split
 
@@ -367,20 +368,29 @@ class VideoProcessor:
             os.makedirs(self.save_tracking_results_dir)
 
         ID_TO_OBJECTS = {i: obj for i, obj in enumerate(self.objects, start=1)}
+        total_masks = []
+
+        old_frame_idx = 0
+        self.video_segments = OrderedDict(sorted(self.video_segments.items()))
+
+
         for frame_idx, segments in self.video_segments.items():
+            assert frame_idx >= old_frame_idx , f'{frame_idx}, {old_frame_idx}'
+            old_frame_idx = frame_idx
             img = cv2.imread(os.path.join(self.source_video_frame_dir, self.frame_names[frame_idx]))
             
             object_ids = list(segments.keys())
             masks = list(segments.values())
             masks = np.concatenate(masks, axis=0)
-            
+            total_masks.append(masks)
             detections = sv.Detections(
                 xyxy=sv.mask_to_xyxy(masks),  # (n, 4)
                 mask=masks, # (n, h, w)
                 class_id=np.array(object_ids, dtype=np.int32),
             )
-            if self.need_save_mask:
-                self.save_mask(detections, frame_idx, save_dir=mask_save_dir)
+            # if self.need_save_mask:
+            #     # self.save_bbox(detections, frame_idx, save_dir=mask_save_dir)
+            #     self.save_mask(
 
 
             if self.save_video:
@@ -391,8 +401,10 @@ class VideoProcessor:
                 mask_annotator = sv.MaskAnnotator()
                 annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=detections)
                 cv2.imwrite(os.path.join(self.save_tracking_results_dir, f"annotated_frame_{frame_idx:05d}.jpg"), annotated_frame)
-
-
+        total_masks = np.stack(total_masks)
+        assert len(total_masks.shape) == 4
+        if self.need_save_mask:
+            self.save_mask(total_masks)
         """
         Step 6: Convert the annotated frames to video
         """
@@ -408,15 +420,33 @@ class VideoProcessor:
         import shutil
         if os.path.exists(save_tracking_results_dir):
             shutil.rmtree(save_tracking_results_dir)
-        
- 
+    def makedir(self, paths):
+        path_parts = paths.split('/')
+
+        current_path = ''
+
+        for part in path_parts:
+            current_path = os.path.join(current_path, part)
+            if not os.path.exists(current_path):
+                os.makedirs(current_path)
+
+    def save_mask(self, masks):
+
+        # Construct the new save directory for masks
+        save_path = self.video_path.replace('videos', 'masks').replace('rgb.mp4', 'masks.npy') 
+        # print('in save_bbox function', save_dir)
+        self.makedir(os.path.dirname(save_path))
+        np.save(save_path, masks)
+        # Ensure the directory exists
+        # Optionally, remove the original video file if it exists
 
 
-    def save_mask(self, detections, frame_idx, save_dir=None):
+
+    def save_bbox(self, detections, frame_idx, save_dir=None):
 
         # Construct the new save directory for masks
         save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks') if save_dir is None else save_dir
-        # print('in save_mask function', save_dir)
+        # print('in save_bbox function', save_dir)
         # Ensure the directory exists
         os.makedirs(save_dir, exist_ok=True)
 
@@ -445,6 +475,9 @@ class VideoProcessor:
 
     def check_if_continue(self, images_dir):
         mask_dir = images_dir.replace('images', 'masks')
+        save_path = self.video_path.replace('videos', 'masks').replace('rgb.mp4', 'masks.npy') 
+        if os.path.exists(save_path):
+            return False
         if os.path.exists(mask_dir) and os.path.exists(images_dir):
             if self.check_dir_len(mask_dir) == self.check_dir_len(images_dir) and self.check_dir_len(mask_dir) != 0:
                 return True
@@ -452,7 +485,7 @@ class VideoProcessor:
         return False
 
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
-        source_video_frame_dir = video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'images') if '0-th' not in video_path else source_video_frame_dir
+        source_video_frame_dir = video_path.replace('videos', 'pix_seg_data').replace('rgb.mp4', 'images') if '0-th' not in video_path else source_video_frame_dir
         if_continue = self.check_if_continue(source_video_frame_dir) if split_for_metric is False else False 
         if if_continue:
             print('----> skip the dir ', source_video_frame_dir)
@@ -482,29 +515,29 @@ class VideoProcessor:
             print('-----> deparched video', video_path)
 if __name__=='__main__':
     process_model = VideoProcessor(save_video=True, re_split=True)
-    # dir_path = './dataset/videos/train/'
-    # #
-    # videos = os.listdir(dir_path)
-    # cnt = 0
-    # from tqdm import tqdm
-    # for video in tqdm(videos):
-    #     cnt +=1 
-    #     video_path =  dir_path + video + '/rgb.mp4'
-    #     # process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
-    #     process_model.update_and_process(video_path)
-    # #process_model.update_and_process('./test_videos/004803_0_0.mp4')
-
-    dir_path = '/home/lr-2002/code/IRASim/generate_video'
+    dir_path = './dataset/videos/train/'
+    #
     videos = os.listdir(dir_path)
+    cnt = 0
+    from tqdm import tqdm
     for video in tqdm(videos):
-        if video.endswith('.mp4'):
-            video_id = video.split('_')[0]
-            if len(video_id) != 6 :
-                continue 
-            mask_dir = os.path.join(dir_path, str(video_id) + '/')
-            if not os.path.exists(mask_dir):
-                os.mkdir(mask_dir)
-            print('video dir is ', video_id, 'mask_dir is', mask_dir)
-            process_model.update_and_process(video_path=os.path.join(dir_path, video), mask_save_dir=mask_dir, save_tracking_results_dir=os.path.join(dir_path, video_id, 'annotate'), split_for_metric=True)
-            
+        cnt +=1 
+        video_path =  dir_path + video + '/rgb.mp4'
+        # process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
+        process_model.update_and_process(video_path)
+    #process_model.update_and_process('./test_videos/004803_0_0.mp4')
+
+    # dir_path = '/home/lr-2002/code/IRASim/generate_video'
+    # videos = os.listdir(dir_path)
+    # for video in tqdm(videos):
+    #     if video.endswith('.mp4'):
+    #         video_id = video.split('_')[0]
+    #         if len(video_id) != 6 :
+    #             continue 
+    #         mask_dir = os.path.join(dir_path, str(video_id) + '/')
+    #         if not os.path.exists(mask_dir):
+    #             os.mkdir(mask_dir)
+    #         print('video dir is ', video_id, 'mask_dir is', mask_dir)
+    #         process_model.update_and_process(video_path=os.path.join(dir_path, video), mask_save_dir=mask_dir, save_tracking_results_dir=os.path.join(dir_path, video_id, 'annotate'), split_for_metric=True)
+    #
 
