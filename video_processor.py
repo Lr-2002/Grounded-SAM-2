@@ -128,7 +128,7 @@ def save_mask_vis(masks, path="mask_object"):
             img.save(f"{path}_{i}.png")
 
 class VideoProcessor:
-    def __init__(self, save_video=True, save_bbox=True, save_mask_vis=False, re_split=False) -> None:
+    def __init__(self, save_video=True, save_bbox=True, save_mask=False, save_mask_vis=False, re_split=False) -> None:
         self.model_id = "IDEA-Research/grounding-dino-tiny"
         self.video_path = "test.mp4"
         self.text_prompt = "object."
@@ -161,7 +161,9 @@ class VideoProcessor:
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.grounding_model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id).to(self.device)
         self.save_mask_vis = save_mask_vis
-        self.need_save_mask = save_bbox
+        self.need_save_mask = save_mask
+
+        self.need_save_bbox = save_bbox
         self.save_video = save_video
         self.re_split = re_split
 
@@ -388,9 +390,8 @@ class VideoProcessor:
                 mask=masks, # (n, h, w)
                 class_id=np.array(object_ids, dtype=np.int32),
             )
-            # if self.need_save_mask:
-            #     # self.save_bbox(detections, frame_idx, save_dir=mask_save_dir)
-            #     self.save_mask(
+            if self.need_save_bbox:
+                self.save_bbox(detections, frame_idx, save_dir=mask_save_dir)
 
 
             if self.save_video:
@@ -451,7 +452,7 @@ class VideoProcessor:
     def save_bbox(self, detections, frame_idx, save_dir=None):
 
         # Construct the new save directory for masks
-        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks') if save_dir is None else save_dir
+        save_dir = self.video_path.replace('videos', 'update_mask_data').replace('rgb.mp4', 'masks') if save_dir is None else save_dir
         # print('in save_bbox function', save_dir)
         # Ensure the directory exists
         os.makedirs(save_dir, exist_ok=True)
@@ -520,7 +521,7 @@ class VideoProcessor:
         else: 
             print('-----> deparched video', video_path)
 if __name__=='__main__':
-    process_model = VideoProcessor(save_video=True, re_split=True)
+    process_model = VideoProcessor(save_video=False, re_split=True)
     dir_path = '/ssd/opensource_robotdata/languagetable/videos/train/'
     #
     videos = os.listdir(dir_path)
