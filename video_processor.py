@@ -80,7 +80,7 @@ def update_bboxes(bboxes, labels, confidences, image_width, image_height):
         if i not in agents_to_remove:
             # Check if the area exceeds 4 times the mean area
             area = calculate_area(bbox)
-            if (i in agents and i not in agents_to_remove) or  area <= 1 * mean_area:
+            if (i in agents and i not in agents_to_remove) or  area <= 2 * mean_area:
                 final_bboxes.append(bbox)
                 final_labels.append(labels[i])
                 final_confidences.append(confidences[i])
