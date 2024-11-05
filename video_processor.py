@@ -201,18 +201,19 @@ class VideoProcessor:
         # scan all the JPEG frame names in this directory
         frame_names = [
             p for p in os.listdir(self.source_video_frame_dir)
-            if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+            if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", 'png']
         ]
         if len(frame_names) ==  0:
             frame_names = [
                 p for p in os.listdir(self.source_video_frame_dir)
-                if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+                if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", 'png']
             ]
         frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
         # init video predictor state
 
         self.frame_names = frame_names
         self.video_len = len(frame_names)
+        print(self.source_video_frame_dir)
         self.inference_state = self.video_predictor.init_state(video_path=self.source_video_frame_dir)
 
         return frame_names
@@ -430,7 +431,6 @@ class VideoProcessor:
             path_parts = paths.split('/')[1:]
             current_path='/'
         for part in path_parts:
-            print('part', part)
             if part =='':
                 continue 
             current_path = os.path.join(current_path, part)
@@ -442,6 +442,7 @@ class VideoProcessor:
         # Construct the new save directory for masks
         save_path = self.video_path.replace('videos', 'masks').replace('rgb.mp4', 'masks.npy') 
         # print('in save_bbox function', save_dir)
+        print('saving mask at', save_path)
         self.makedir(os.path.dirname(save_path))
         np.save(save_path, masks)
         # Ensure the directory exists
@@ -491,6 +492,31 @@ class VideoProcessor:
 
         return False
 
+    def process_from_source_frame_dir(self, source_video_frame_dir, output_video_path='processed_video.mp4', text_prompt='object.', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
+        self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
+
+        self.check_if_need_split()
+
+        
+
+        self.load_frame_name()
+        
+        self.set_better_ref()
+
+        remain = self.gdino_process()
+        if remain:
+            self.sam2_image_process()
+
+            self.prepare_sam2_video()
+
+            self.propagate_in_video()
+
+
+            self.vis_and_save(mask_save_dir=mask_save_dir)
+        else: 
+            print('-----> deparched video', video_path)
+
+
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
         source_video_frame_dir = video_path.replace('videos', 'pix_seg_data').replace('rgb.mp4', 'images') if '0-th' not in video_path else source_video_frame_dir
         if_continue = self.check_if_continue(source_video_frame_dir) if split_for_metric is False else False 
@@ -521,8 +547,8 @@ class VideoProcessor:
         else: 
             print('-----> deparched video', video_path)
 if __name__=='__main__':
-    process_model = VideoProcessor(save_video=False, re_split=True)
-    dir_path = '/ssd/opensource_robotdata/languagetable/videos/train/'
+    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=False, save_mask=True)
+    dir_path = '/home/lr-2002/code/Grounded-SAM-2/dataset/videos/train/'
     #
     videos = os.listdir(dir_path)
     cnt = 0
@@ -530,9 +556,8 @@ if __name__=='__main__':
     for video in tqdm(videos):
         cnt +=1 
         video_path =  dir_path + video + '/rgb.mp4'
-        # process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
-        process_model.update_and_process(video_path)
-    #process_model.update_and_process('./test_videos/004803_0_0.mp4')
+        process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
+
 
     # dir_path = '/home/lr-2002/code/IRASim/generate_video'
     # videos = os.listdir(dir_path)
