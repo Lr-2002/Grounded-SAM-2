@@ -440,7 +440,7 @@ class VideoProcessor:
     def save_mask(self, masks):
 
         # Construct the new save directory for masks
-        save_path = self.video_path.replace('videos', 'masks').replace('rgb.mp4', 'masks.npy') 
+        save_path = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks') 
         # print('in save_bbox function', save_dir)
         print('saving mask at', save_path)
         self.makedir(os.path.dirname(save_path))
@@ -453,7 +453,7 @@ class VideoProcessor:
     def save_bbox(self, detections, frame_idx, save_dir=None):
 
         # Construct the new save directory for masks
-        save_dir = self.video_path.replace('videos', 'update_mask_data').replace('rgb.mp4', 'masks') if save_dir is None else save_dir
+        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'bbox') if save_dir is None else save_dir
         # print('in save_bbox function', save_dir)
         # Ensure the directory exists
         os.makedirs(save_dir, exist_ok=True)
@@ -518,7 +518,7 @@ class VideoProcessor:
 
 
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
-        source_video_frame_dir = video_path.replace('videos', 'pix_seg_data').replace('rgb.mp4', 'images') if '0-th' not in video_path else source_video_frame_dir
+        source_video_frame_dir = video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'images') if '0-th' not in video_path else source_video_frame_dir
         if_continue = self.check_if_continue(source_video_frame_dir) if split_for_metric is False else False 
         if if_continue:
             print('----> skip the dir ', source_video_frame_dir)
@@ -547,7 +547,7 @@ class VideoProcessor:
         else: 
             print('-----> deparched video', video_path)
 if __name__=='__main__':
-    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=False, save_mask=True)
+    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True)
     dir_path = '/home/lr-2002/code/Grounded-SAM-2/dataset/videos/train/'
     #
     videos = os.listdir(dir_path)
