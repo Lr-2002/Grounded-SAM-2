@@ -80,7 +80,7 @@ def update_bboxes(bboxes, labels, confidences, image_width, image_height):
         if i not in agents_to_remove:
             # Check if the area exceeds 4 times the mean area
             area = calculate_area(bbox)
-            if (i in agents and i not in agents_to_remove) :
+            if (i in agents and i not in agents_to_remove) or area <= 5 * mean_area:
                 final_bboxes.append(bbox)
                 final_labels.append(labels[i])
                 final_confidences.append(confidences[i])
@@ -128,7 +128,7 @@ def save_mask_vis(masks, path="mask_object"):
             img.save(f"{path}_{i}.png")
 
 class VideoProcessor:
-    def __init__(self, save_video=True, save_bbox=True, save_mask=False, save_mask_vis=False, re_split=False) -> None:
+    def __init__(self, save_video=True, save_bbox=True, save_mask=False, save_mask_vis=False, re_split=False, save_bbox_vis=True) -> None:
         self.model_id = "IDEA-Research/grounding-dino-tiny"
         self.video_path = "test.mp4"
         self.text_prompt = "object."
@@ -530,7 +530,7 @@ class VideoProcessor:
         else: 
             print('-----> deparched video', video_path)
 if __name__=='__main__':
-    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True)
+    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
     dir_path = '/home/lr-2002/code/Grounded-SAM-2/dataset/videos/train/'
     #
     videos = os.listdir(dir_path)
