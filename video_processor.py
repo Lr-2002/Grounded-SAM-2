@@ -80,7 +80,7 @@ def update_bboxes(bboxes, labels, confidences, image_width, image_height):
         if i not in agents_to_remove:
             # Check if the area exceeds 4 times the mean area
             area = calculate_area(bbox)
-            if (i in agents and i not in agents_to_remove) or  area <= 2 * mean_area:
+            if (i in agents and i not in agents_to_remove) :
                 final_bboxes.append(bbox)
                 final_labels.append(labels[i])
                 final_confidences.append(confidences[i])
@@ -213,7 +213,6 @@ class VideoProcessor:
 
         self.frame_names = frame_names
         self.video_len = len(frame_names)
-        print(self.source_video_frame_dir)
         self.inference_state = self.video_predictor.init_state(video_path=self.source_video_frame_dir)
 
         return frame_names
@@ -257,7 +256,6 @@ class VideoProcessor:
                 self.set_ref_idx(idx)
         if flag== None :
             self.set_ref_idx(-1)
-        print('the max num is ', max_num)
 
 
     # prompt grounding dino to get the box coordinates on specific frame
@@ -371,7 +369,6 @@ class VideoProcessor:
             os.makedirs(self.save_tracking_results_dir)
 
         ID_TO_OBJECTS = {i: obj for i, obj in enumerate(self.objects, start=1)}
-        total_masks = []
 
         old_frame_idx = 0
         self.video_segments = OrderedDict(sorted(self.video_segments.items()))
@@ -385,7 +382,6 @@ class VideoProcessor:
             object_ids = list(segments.keys())
             masks = list(segments.values())
             masks = np.concatenate(masks, axis=0)
-            total_masks.append(masks)
             detections = sv.Detections(
                 xyxy=sv.mask_to_xyxy(masks),  # (n, 4)
                 mask=masks, # (n, h, w)
@@ -393,7 +389,8 @@ class VideoProcessor:
             )
             if self.need_save_bbox:
                 self.save_bbox(detections, frame_idx, save_dir=mask_save_dir)
-
+            if self.need_save_mask:
+                self.save_mask(masks, frame_idx, save_dir = mask_save_dir)
 
             if self.save_video:
                 box_annotator = sv.BoxAnnotator()
@@ -403,10 +400,6 @@ class VideoProcessor:
                 mask_annotator = sv.MaskAnnotator()
                 annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=detections)
                 cv2.imwrite(os.path.join(self.save_tracking_results_dir, f"annotated_frame_{frame_idx:05d}.jpg"), annotated_frame)
-        total_masks = np.stack(total_masks)
-        assert len(total_masks.shape) == 4
-        if self.need_save_mask:
-            self.save_mask(total_masks)
         """
         Step 6: Convert the annotated frames to video
         """
@@ -435,48 +428,39 @@ class VideoProcessor:
                 continue 
             current_path = os.path.join(current_path, part)
             if not os.path.exists(current_path):
-                os.makedirs(current_path)
+                os.makedirs(current_path, exist_ok=True)
 
-    def save_mask(self, masks):
+    def save_mask(self, masks, frame_idx, save_dir=None):
 
         # Construct the new save directory for masks
-        save_path = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks') 
-        # print('in save_bbox function', save_dir)
-        print('saving mask at', save_path)
-        self.makedir(os.path.dirname(save_path))
-        np.save(save_path, masks)
-        # Ensure the directory exists
-        # Optionally, remove the original video file if it exists
+        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks')  if save_dir is None else save_dir
+        self.makedir(save_dir)
+        # Construct the filename for the frame
+        frame_filename = f'{frame_idx:05d}.npy'
+        frame_path = os.path.join(save_dir, frame_filename)
+ 
+        np.save(frame_path, masks)
 
 
 
     def save_bbox(self, detections, frame_idx, save_dir=None):
 
-        # Construct the new save directory for masks
         save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'bbox') if save_dir is None else save_dir
-        # print('in save_bbox function', save_dir)
-        # Ensure the directory exists
-        os.makedirs(save_dir, exist_ok=True)
+        self.makedir(save_dir)
 
-        # Construct the filename for the frame
-        frame_filename = f'frame{frame_idx:06d}.npz'
+        frame_filename = f'{frame_idx:05d}.npy'
         frame_path = os.path.join(save_dir, frame_filename)
-        # Prepare the data to save
         image_size = ( 1, *self.video_info.resolution_wh)   # Example image size, adjust as needed 
         bbox_data = {'image_size': image_size}
         
-        # Process detections
         for idx, (bbox, class_id) in enumerate(zip(detections.xyxy, detections.class_id)):
-            # Each bbox is expected to be in the format [x1, y1, x2, y2]
             x1, y1, x2, y2 = bbox
             class_id = str(class_id)
             bbox_data[class_id] = [x1, y1, x2, y2]
 
-        # Save the data in a compressed format
         data = {'arr_0': bbox_data}
-        np.savez_compressed(frame_path, **data)
+        np.save(frame_path, bbox_data)
 
-        # Optionally, remove the original video file if it exists
 
     def check_dir_len(self, path):
         return len(os.listdir(path))
@@ -523,7 +507,6 @@ class VideoProcessor:
         if if_continue:
             print('----> skip the dir ', source_video_frame_dir)
             return 
-        # print('processing the video', video_path)
         self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
 
         self.check_if_need_split()
