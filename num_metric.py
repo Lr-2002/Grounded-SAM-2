@@ -3,7 +3,7 @@ import re
 import os
 import shutil
 from tqdm import tqdm
-
+from video_processor import VideoProcessor
     # Function to track objects in subsequent frames
 def track_objects(previous_frame, current_frame, tracked_objects, frame_index):
     for obj_id, position in enumerate(current_frame):
@@ -39,11 +39,15 @@ def get_frame_objects(frame, filte_agent=True, reference_id=None):
     ans = {}
     mean_area= 0 
     for obj_id in frame.keys():
-        if obj_id == 'image_size': 
-            continue 
-        sum_obj = np.sum(frame[str(obj_id)])
-        if sum_obj == 0 :
-            continue 
+        try:
+            obj_id = int(obj_id)
+        except:
+            continue
+        # if obj_id == 'image_size': 
+        #     continue 
+        # sum_obj = np.sum(frame[str(obj_id)])
+        # if sum_obj == 0 :
+        #     continue 
             
         obj_id = int(obj_id)
         points = frame[str(obj_id)]
@@ -53,6 +57,8 @@ def get_frame_objects(frame, filte_agent=True, reference_id=None):
         if filte_agent:
             if area> 6000:
                 continue    
+        if area==0 : 
+            continue
         if reference_id is not None:
             if obj_id not in  reference_id:
                 continue
@@ -166,7 +172,7 @@ def update_metrics(pre_frame, this_frame, history_ids):
     return {'hide': hide, 'miss': miss, 'addon':addon}, history_ids
 
 # Directory containing the mask files
-def object_num_metric(mask_dir):
+def load_from_npz(mask_dir):
     # Step 1: Load all frame data, history_ids
     frame_data = {} 
     sorted_dir = [x for x in os.listdir(mask_dir) if x.endswith('npz')]
@@ -183,14 +189,24 @@ def object_num_metric(mask_dir):
             filepath = os.path.join(mask_dir, filename)
             frame_data[itt] = load_arr(filepath)
             itt +=1 
+    return frame_data
 
-    # Step 2: Track objects across frames
-    # Initialize a dictionary to hold the tracking information
+def load_from_detections(frame_data):
+    det_dict = {}
+    for i in range(len(frame_data)):
+        det_dict[str(int(frame_data.class_id[i]))] = (frame_data.xyxy[i])
+    return det_dict
+
+
+def object_num_metric(mask_dir=None, frame_data_list =None ):
+    assert bool(mask_dir) + bool(frame_data_list) == 1
+
+    if mask_dir is not None: 
+        frame_data = load_from_npz(mask_dir)
+    if frame_data_list is not None:
+        frame_data = [load_from_detections(frame) for frame in frame_data_list]
     tracked_objects = {}
     
-    # Assume the first frame is the reference for tracking
-    first_frame = frame_data[0]
-    # Initialize tracked objects with the first frame
     obj_num_list = []
     objs_list = []
     miss_items = 0 
@@ -198,7 +214,7 @@ def object_num_metric(mask_dir):
     addon_items = 0
     reference_id = None 
     history_ids = set()
-    for frame_id, frame in enumerate(frame_data.values()):
+    for frame_id, frame in enumerate(frame_data.values() if isinstance(frame_data, dict) else frame_data):
         
         objs = get_frame_objects(frame, filte_agent=False, reference_id=reference_id)
         if frame_id == 0 : 
@@ -223,25 +239,30 @@ def object_num_metric(mask_dir):
                 hide_items += miss_dict['hide']
                 addon_items += miss_dict['addon']
     # print(obj_num_list)
-    if miss_items +  hide_items + addon_items != 0 : 
-        print(miss_items, hide_items, addon_items, mask_dir, mask_dir.split('/')[-1])
+    return [miss_items, hide_items, addon_items, len(history_ids)]
 if __name__=='__main__':
 
-    # mask_dir = './dataset/mask_data/val/'  # Update this to your mask directory
-    # for i in tqdm(os.listdir(mask_dir)):
-    #     test_dir = os.path.join(mask_dir, i, 'masks')
-    #     # check_first_frame(test_dir)
-    #     copy_available_data(test_dir, i, ori_dir=mask_dir)
-    mask_dir = '/home/lr-2002/code/IRASim/generate_video/'  # Update this to your mask directory
+    mask_dir = '/home/lr-2002/visualization/recon/ref/'  # Update this to your mask directory
+    debug = False
     all_dirs = os.listdir
-    for video in tqdm(sorted(os.listdir(mask_dir))):
+    video_processor = VideoProcessor(re_split=False, save_video=False, save_bbox=False, save_mask=False, save_bbox_vis=False)
+    total_analysis = []
+    for video_id, video in tqdm(enumerate(sorted(os.listdir(mask_dir)))):
+        if video_id ==10 and debug:
+            break
         path = os.path.join(mask_dir, video)
-        # input('next?')
-        if os.path.isdir(path):
+        # if os.path.isdir(path):
+        #     object_num_metric(mask_dir=path)
+        #
 
-            # test_dir = os.path.join(mask_dir, i, 'masks')
+        frame_data_list = video_processor.get_detections(path,source_video_frame_dir=path)
+        if frame_data_list is None :
+            continue
+        total_analysis.append(object_num_metric(frame_data_list=frame_data_list))
+    print(total_analysis)
+    import pandas as pd 
+    data=  pd.DataFrame(total_analysis)
+    data_file = './data.csv'
+    data.to_csv(data_file, index=False)
+    print(f'data saved to {data_file}')
 
-            test_dir = path
-            # check_first_frame(test_dir)
-            # copy_available_data(test_dir, i, ori_dir=mask_dir)
-            object_num_metric(test_dir)

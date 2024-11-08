@@ -14,10 +14,13 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 from utils.track_utils import sample_points_from_masks
 from utils.video_utils import create_video_from_images
-
+VIDEO_SUFFIX = 'video.mp4'
+PATH_SUFFIX = 'lt_sim'
+PATH_REPLACE = PATH_SUFFIX + '_seged'
 """
 Hyperparam for Ground and Tracking
 """
+
 def calculate_iou(bbx1, bbx2):
     """计算两个边界框的IOU（Intersection over Union）。"""
     x1 = max(bbx1[0], bbx2[0])
@@ -208,7 +211,10 @@ class VideoProcessor:
                 p for p in os.listdir(self.source_video_frame_dir)
                 if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", 'png']
             ]
-        frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
+        if '_' in frame_names[0]:
+            frame_names.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
+        else: 
+            frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
         # init video predictor state
 
         self.frame_names = frame_names
@@ -361,7 +367,7 @@ class VideoProcessor:
                 }
 
         return self.video_segments
-    def vis_and_save(self, mask_save_dir=None):
+    def vis_and_save(self, mask_save_dir=None, save_all=True):
         """
         Step 5: Visualize the segment results across the video and save them
         """
@@ -373,7 +379,8 @@ class VideoProcessor:
         old_frame_idx = 0
         self.video_segments = OrderedDict(sorted(self.video_segments.items()))
 
-
+        all_detections = []
+        all_masks = []
         for frame_idx, segments in self.video_segments.items():
             assert frame_idx >= old_frame_idx , f'{frame_idx}, {old_frame_idx}'
             old_frame_idx = frame_idx
@@ -387,24 +394,28 @@ class VideoProcessor:
                 mask=masks, # (n, h, w)
                 class_id=np.array(object_ids, dtype=np.int32),
             )
-            if self.need_save_bbox:
-                self.save_bbox(detections, frame_idx, save_dir=mask_save_dir)
-            if self.need_save_mask:
-                self.save_mask(masks, frame_idx, save_dir = mask_save_dir)
+            all_detections.append(detections)
+            if save_all:
+                if self.need_save_bbox:
+                    self.save_bbox(detections, frame_idx, save_dir=mask_save_dir)
+                if self.need_save_mask:
+                    self.save_mask(masks, frame_idx, save_dir = mask_save_dir)
 
-            if self.save_video:
-                box_annotator = sv.BoxAnnotator()
-                annotated_frame = box_annotator.annotate(scene=img.copy(), detections=detections)
-                label_annotator = sv.LabelAnnotator()
-                annotated_frame = label_annotator.annotate(annotated_frame, detections=detections, labels=[ID_TO_OBJECTS[i] for i in object_ids])
-                mask_annotator = sv.MaskAnnotator()
-                annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=detections)
-                cv2.imwrite(os.path.join(self.save_tracking_results_dir, f"annotated_frame_{frame_idx:05d}.jpg"), annotated_frame)
+                if self.save_video:
+                    box_annotator = sv.BoxAnnotator()
+                    annotated_frame = box_annotator.annotate(scene=img.copy(), detections=detections)
+                    label_annotator = sv.LabelAnnotator()
+                    annotated_frame = label_annotator.annotate(annotated_frame, detections=detections, labels=[ID_TO_OBJECTS[i] for i in object_ids])
+                    mask_annotator = sv.MaskAnnotator()
+                    annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=detections)
+                    cv2.imwrite(os.path.join(self.save_tracking_results_dir, f"annotated_frame_{frame_idx:05d}.jpg"), annotated_frame)
         """
         Step 6: Convert the annotated frames to video
         """
-        if self.save_video:
-            create_video_from_images(self.save_tracking_results_dir, self.output_video_path)
+        if save_all:
+            if self.save_video:
+                create_video_from_images(self.save_tracking_results_dir, self.output_video_path)
+        return all_detections
     def update_files(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results'):
         self.video_path = video_path
         self.text_prompt = text_prompt
@@ -433,7 +444,7 @@ class VideoProcessor:
     def save_mask(self, masks, frame_idx, save_dir=None):
 
         # Construct the new save directory for masks
-        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'masks')  if save_dir is None else save_dir
+        save_dir = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'masks')  if save_dir is None else save_dir
         self.makedir(save_dir)
         # Construct the filename for the frame
         frame_filename = f'{frame_idx:05d}.npy'
@@ -445,7 +456,7 @@ class VideoProcessor:
 
     def save_bbox(self, detections, frame_idx, save_dir=None):
 
-        save_dir = self.video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'bbox') if save_dir is None else save_dir
+        save_dir = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'bbox') if save_dir is None else save_dir
         self.makedir(save_dir)
 
         frame_filename = f'{frame_idx:05d}.npy'
@@ -467,7 +478,7 @@ class VideoProcessor:
 
     def check_if_continue(self, images_dir):
         mask_dir = images_dir.replace('images', 'masks')
-        save_path = self.video_path.replace('videos', 'masks').replace('rgb.mp4', 'masks.npy') 
+        save_path = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'masks.npy') 
         if os.path.exists(save_path):
             return False
         if os.path.exists(mask_dir) and os.path.exists(images_dir):
@@ -476,15 +487,17 @@ class VideoProcessor:
 
         return False
 
-    def process_from_source_frame_dir(self, source_video_frame_dir, output_video_path='processed_video.mp4', text_prompt='object.', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
-        self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
+    def get_detections(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
+        # self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
 
+        self.text_prompt = text_prompt
+        self.source_video_frame_dir = source_video_frame_dir
         self.check_if_need_split()
 
-        
-
         self.load_frame_name()
-        
+        test_image = Image.open(os.path.join(source_video_frame_dir, self.frame_names[0]))
+        image_size = test_image.size
+        self.video_info = sv.VideoInfo(width=image_size[0], height=image_size[1], fps=25)
         self.set_better_ref()
 
         remain = self.gdino_process()
@@ -496,13 +509,11 @@ class VideoProcessor:
             self.propagate_in_video()
 
 
-            self.vis_and_save(mask_save_dir=mask_save_dir)
-        else: 
-            print('-----> deparched video', video_path)
+            return self.vis_and_save(save_all=False)
 
-
+   
     def update_and_process(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
-        source_video_frame_dir = video_path.replace('videos', 'mask_data').replace('rgb.mp4', 'images') if '0-th' not in video_path else source_video_frame_dir
+        source_video_frame_dir = video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'images') if '0-th' not in video_path else source_video_frame_dir
         if_continue = self.check_if_continue(source_video_frame_dir) if split_for_metric is False else False 
         if if_continue:
             print('----> skip the dir ', source_video_frame_dir)
@@ -531,14 +542,14 @@ class VideoProcessor:
             print('-----> deparched video', video_path)
 if __name__=='__main__':
     process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
-    dir_path = '/home/lr-2002/code/Grounded-SAM-2/dataset/videos/train/'
+    dir_path = '/ssd/lt/processed_dataset/lt_sim/train/'
     #
     videos = os.listdir(dir_path)
     cnt = 0
     from tqdm import tqdm
     for video in tqdm(videos):
         cnt +=1 
-        video_path =  dir_path + video + '/rgb.mp4'
+        video_path =  dir_path + video + f'/{VIDEO_SUFFIX}'
         process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
 
 
