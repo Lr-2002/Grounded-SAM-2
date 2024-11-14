@@ -198,55 +198,82 @@ def load_from_detections(frame_data):
     return det_dict
 
 
-def object_num_metric(mask_dir=None, frame_data_list =None ):
-    assert bool(mask_dir) + bool(frame_data_list) == 1
+class ObjectPermanenceMetric():
+    def __init__(self):
+        self.video_processor = VideoProcessor(re_split=False, save_video=False, save_bbox=False, save_mask=False, save_bbox_vis=False)
 
-    if mask_dir is not None: 
-        frame_data = load_from_npz(mask_dir)
-    if frame_data_list is not None:
-        frame_data = [load_from_detections(frame) for frame in frame_data_list]
-    tracked_objects = {}
-    
-    obj_num_list = []
-    objs_list = []
-    miss_items = 0 
-    hide_items = 0
-    addon_items = 0
-    reference_id = None 
-    history_ids = set()
-    for frame_id, frame in enumerate(frame_data.values() if isinstance(frame_data, dict) else frame_data):
+    def object_num_metric(self, mask_dir=None, frame_data_list =None ):
+        assert bool(mask_dir) + bool(frame_data_list) == 1
+
+        if mask_dir is not None: 
+            frame_data = load_from_npz(mask_dir)
+        if frame_data_list is not None:
+            frame_data = [load_from_detections(frame) for frame in frame_data_list]
+        tracked_objects = {}
         
-        objs = get_frame_objects(frame, filte_agent=False, reference_id=reference_id)
-        if frame_id == 0 : 
-            reference_id = objs.keys()
-            history_ids.update(set(reference_id))
-            # print(history_ids)
-        objs_list.append(objs)
+        obj_num_list = []
+        objs_list = []
+        miss_items = 0 
+        hide_items = 0
+        addon_items = 0
+        reference_id = None 
+        history_ids = set()
+        for frame_id, frame in enumerate(frame_data.values() if isinstance(frame_data, dict) else frame_data):
+            
+            objs = get_frame_objects(frame, filte_agent=False, reference_id=reference_id)
+            if frame_id == 0 : 
+                reference_id = objs.keys()
+                history_ids.update(set(reference_id))
+                # print(history_ids)
+            objs_list.append(objs)
+            
+            obj_num_list.append(len(objs.keys()))
+            if frame_id >=1   : 
+                prev_len = obj_num_list[frame_id-1]
+                this_len = obj_num_list[frame_id]
+                prev_frame = objs_list[frame_id-1]
+                this_frame = objs_list[frame_id]
+                if prev_len != this_len or len(find_delta_ids(prev_frame.keys(), this_frame.keys())): 
+                    
+                   # update_metrics(prev_frame, this_frame)
+                    # print('now processing the id', frame_id)
+                    miss_dict, history_ids= update_metrics(prev_frame, this_frame, history_ids)
+                    # print(miss_dict)
+                    miss_items += miss_dict['miss']
+                    hide_items += miss_dict['hide']
+                    addon_items += miss_dict['addon']
+        # print(obj_num_list)
+        answer_dict = dict(miss=miss_items, hide=hide_items, addon=addon_items, total_len=len(history_ids))
+        return answer_dict
+
+    def infer(self, video_path):
+        frame_data_list = self.video_processor.get_detections(video_path,source_video_frame_dir=video_path)
+        if frame_data_list:
+            return self.object_num_metric(frame_data_list=frame_data_list)
+        else: 
+            raise  NoObjFoundError(video_path)
+
+class NoObjFoundError(Exception):
+    def __init__(self, video_path):
+        super().__init__()
+        self.video_path = video_path
         
-        obj_num_list.append(len(objs.keys()))
-        if frame_id >=1   : 
-            prev_len = obj_num_list[frame_id-1]
-            this_len = obj_num_list[frame_id]
-            prev_frame = objs_list[frame_id-1]
-            this_frame = objs_list[frame_id]
-            if prev_len != this_len or len(find_delta_ids(prev_frame.keys(), this_frame.keys())): 
-                
-               # update_metrics(prev_frame, this_frame)
-                # print('now processing the id', frame_id)
-                miss_dict, history_ids= update_metrics(prev_frame, this_frame, history_ids)
-                # print(miss_dict)
-                miss_items += miss_dict['miss']
-                hide_items += miss_dict['hide']
-                addon_items += miss_dict['addon']
-    # print(obj_num_list)
-    return [miss_items, hide_items, addon_items, len(history_ids)]
+    def __str__(self):
+        return f"Error: There is no objects found in the video :{self.video_path}"
+
+
+
+
 if __name__=='__main__':
 
-    mask_dir = '/home/lr-2002/visualization/recon/ref/'  # Update this to your mask directory
+    # mask_dir = '/home/lr-2002/visualization/recon/ref/'  # Update this to your mask directory
+    # mask_dir = '/home/lr-2002/code/IRASim/fi_ge/'  # Update this to your mask directory
+    mask_dir = '/home/lr-2002/selected_videos/visualize_image_spatial_temp/recon/ref/'  # Update this to your mask directory
     debug = False
     all_dirs = os.listdir
-    video_processor = VideoProcessor(re_split=False, save_video=False, save_bbox=False, save_mask=False, save_bbox_vis=False)
+    obj_metric = ObjectPermanenceMetric()
     total_analysis = []
+    failed_videos = 0
     for video_id, video in tqdm(enumerate(sorted(os.listdir(mask_dir)))):
         if video_id ==10 and debug:
             break
@@ -254,15 +281,10 @@ if __name__=='__main__':
         # if os.path.isdir(path):
         #     object_num_metric(mask_dir=path)
         #
+        try: 
+            total_analysis.append(obj_metric.infer(path))
+        except NoObjFoundError:
+            failed_videos +=1 
 
-        frame_data_list = video_processor.get_detections(path,source_video_frame_dir=path)
-        if frame_data_list is None :
-            continue
-        total_analysis.append(object_num_metric(frame_data_list=frame_data_list))
     print(total_analysis)
-    import pandas as pd 
-    data=  pd.DataFrame(total_analysis)
-    data_file = './data.csv'
-    data.to_csv(data_file, index=False)
-    print(f'data saved to {data_file}')
 
