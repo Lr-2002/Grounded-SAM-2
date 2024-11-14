@@ -250,6 +250,7 @@ def load_video_frames_from_jpg_images(
     else: 
         frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
 
+    frame_names =  frame_names[:500] if len(frame_names) > 500 else frame_names
     num_frames = len(frame_names)
     if num_frames == 0:
         raise RuntimeError(f"no images found in {jpg_folder}")

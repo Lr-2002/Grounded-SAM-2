@@ -216,7 +216,7 @@ class VideoProcessor:
         else: 
             frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
         # init video predictor state
-
+        frame_names =  frame_names[:500] if len(frame_names) > 500 else frame_names
         self.frame_names = frame_names
         self.video_len = len(frame_names)
         self.inference_state = self.video_predictor.init_state(video_path=self.source_video_frame_dir)
