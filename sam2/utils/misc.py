@@ -243,7 +243,7 @@ def load_video_frames_from_jpg_images(
     frame_names = [
         p
         for p in os.listdir(jpg_folder)
-        if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+        if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", '.png']
     ]
     if '_' in frame_names[0]:
         frame_names.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))

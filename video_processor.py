@@ -14,8 +14,8 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 from utils.track_utils import sample_points_from_masks
 from utils.video_utils import create_video_from_images
-VIDEO_SUFFIX = 'video.mp4'
-PATH_SUFFIX = 'lt_sim'
+VIDEO_SUFFIX = 'rgb.mp4'
+PATH_SUFFIX = 'videos'
 PATH_REPLACE = PATH_SUFFIX + '_seged'
 """
 Hyperparam for Ground and Tracking
@@ -204,12 +204,12 @@ class VideoProcessor:
         # scan all the JPEG frame names in this directory
         frame_names = [
             p for p in os.listdir(self.source_video_frame_dir)
-            if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", 'png']
+            if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", '.png']
         ]
         if len(frame_names) ==  0:
             frame_names = [
                 p for p in os.listdir(self.source_video_frame_dir)
-                if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", 'png']
+                if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG", '.png']
             ]
         if '_' in frame_names[0]:
             frame_names.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
@@ -285,7 +285,6 @@ class VideoProcessor:
 
         # process the detection results
 
-        # prompt SAM 2 image predictor to get the mask for the object
         self.image_masks, self.image_scores, self.image_logits = self.image_predictor.predict(
             point_coords=None,
             point_labels=None,
@@ -444,19 +443,21 @@ class VideoProcessor:
     def save_mask(self, masks, frame_idx, save_dir=None):
 
         # Construct the new save directory for masks
-        save_dir = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'masks')  if save_dir is None else save_dir
+        save_dir = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'masks').replace('images', 'masks')  if save_dir is None else save_dir
         self.makedir(save_dir)
         # Construct the filename for the frame
-        frame_filename = f'{frame_idx:05d}.npy'
+        
+        frame_filename = f'{frame_idx:05d}.npz'
         frame_path = os.path.join(save_dir, frame_filename)
- 
-        np.save(frame_path, masks)
+        masks_shape = masks.shape 
+        masks = np.resize(masks_shape, (masks_shape[0], 180, 320))
+        np.savez_compressed(frame_path, masks)
 
 
 
     def save_bbox(self, detections, frame_idx, save_dir=None):
 
-        save_dir = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'bbox') if save_dir is None else save_dir
+        save_dir = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'bbox').replace('image', 'bbox') if save_dir is None else save_dir
         self.makedir(save_dir)
 
         frame_filename = f'{frame_idx:05d}.npy'
@@ -486,6 +487,37 @@ class VideoProcessor:
                 return True
 
         return False
+    def generate_from_split_images_with_bbox(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
+        # self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
+        self.text_prompt = text_prompt
+        self.source_video_frame_dir = source_video_frame_dir
+        # self.check_if_need_split()
+
+        self.load_frame_name()
+        test_image = Image.open(os.path.join(source_video_frame_dir, self.frame_names[0]))
+        image_size = test_image.size
+        self.video_info = sv.VideoInfo(width=image_size[0], height=image_size[1], fps=25)
+        # self.set_better_ref()
+
+        # remain = self.gdino_process()
+        # if remain:
+
+        self.input_boxes = [np.array([33,38, 52, 89]), np.array([105, 121, 125, 170])]
+        converted_image = np.array(test_image.convert("RGB"))
+        h, w = converted_image.shape[:2]
+        self.objects = [0,1]
+        self.converted_image = converted_image
+        self.ann_frame_idx = 0
+        self.sam2_image_process()
+
+        self.prepare_sam2_video()
+
+        self.propagate_in_video()
+
+
+        return self.vis_and_save(save_all=True)
+
+ 
 
     def get_detections(self, video_path, output_video_path='processed_video.mp4', text_prompt='object.', source_video_frame_dir='./tmp/source_video_frame', save_tracking_results_dir='./tmp/save_tracking_results', mask_save_dir=None, split_for_metric=False):
         # self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
@@ -519,6 +551,9 @@ class VideoProcessor:
             print('----> skip the dir ', source_video_frame_dir)
             return 
         self.update_files(video_path, output_video_path,text_prompt, source_video_frame_dir, save_tracking_results_dir)
+        save_dir = self.video_path.replace(PATH_SUFFIX, PATH_REPLACE).replace(VIDEO_SUFFIX, 'bbox')
+        if os.path.exists(save_dir):
+            return 
 
         self.check_if_need_split()
 
@@ -541,17 +576,18 @@ class VideoProcessor:
         else: 
             print('-----> deparched video', video_path)
 if __name__=='__main__':
-    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
-    dir_path = '/ssd/lt/processed_dataset/lt_sim/train/'
+    # process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
+    # dir_path = '/ssd/lt/processed_dataset/lt_sim/train/'
+    # dir_path = './dataset/videos/train/'
+    # #
+    # videos = os.listdir(dir_path)
+    # cnt = 0
+    # from tqdm import tqdm
+    # for video in tqdm(videos):
+    #     cnt +=1 
+    #     video_path =  dir_path + video + f'/{VIDEO_SUFFIX}'
+    #     process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
     #
-    videos = os.listdir(dir_path)
-    cnt = 0
-    from tqdm import tqdm
-    for video in tqdm(videos):
-        cnt +=1 
-        video_path =  dir_path + video + f'/{VIDEO_SUFFIX}'
-        process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
-
 
     # dir_path = '/home/lr-2002/code/IRASim/generate_video'
     # videos = os.listdir(dir_path)
@@ -567,3 +603,11 @@ if __name__=='__main__':
     #         process_model.update_and_process(video_path=os.path.join(dir_path, video), mask_save_dir=mask_dir, save_tracking_results_dir=os.path.join(dir_path, video_id, 'annotate'), split_for_metric=True)
     #
 
+    
+    # data_boxing_hard 
+
+    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
+    dir_path = '/ssd/data_boxing_hard/'
+    for video in tqdm(os.listdir(dir_path)):
+        video_path = os.path.join(dir_path,  video, 'images') 
+        process_model.generate_from_split_images_with_bbox(None, source_video_frame_dir=video_path)
