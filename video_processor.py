@@ -449,8 +449,6 @@ class VideoProcessor:
         
         frame_filename = f'{frame_idx:05d}.npz'
         frame_path = os.path.join(save_dir, frame_filename)
-        masks_shape = masks.shape 
-        masks = np.resize(masks_shape, (masks_shape[0], 180, 320))
         np.savez_compressed(frame_path, masks)
 
 
@@ -576,18 +574,18 @@ class VideoProcessor:
         else: 
             print('-----> deparched video', video_path)
 if __name__=='__main__':
-    # process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
+    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
     # dir_path = '/ssd/lt/processed_dataset/lt_sim/train/'
-    # dir_path = './dataset/videos/train/'
-    # #
-    # videos = os.listdir(dir_path)
-    # cnt = 0
-    # from tqdm import tqdm
-    # for video in tqdm(videos):
-    #     cnt +=1 
-    #     video_path =  dir_path + video + f'/{VIDEO_SUFFIX}'
-    #     process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
+    dir_path = './dataset/videos/train/'
     #
+    videos = os.listdir(dir_path)
+    cnt = 0
+    from tqdm import tqdm
+    for video in tqdm(videos):
+        cnt +=1 
+        video_path =  dir_path + video + f'/{VIDEO_SUFFIX}'
+        process_model.update_and_process(video_path, output_video_path='output_dir/' +str(cnt) + '.mp4', text_prompt='object.')
+
 
     # dir_path = '/home/lr-2002/code/IRASim/generate_video'
     # videos = os.listdir(dir_path)
@@ -606,8 +604,8 @@ if __name__=='__main__':
     
     # data_boxing_hard 
 
-    process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
-    dir_path = '/ssd/data_boxing_hard/'
-    for video in tqdm(os.listdir(dir_path)):
-        video_path = os.path.join(dir_path,  video, 'images') 
-        process_model.generate_from_split_images_with_bbox(None, source_video_frame_dir=video_path)
+    # process_model = VideoProcessor(save_video=False, re_split=True, save_bbox=True, save_mask=True, save_mask_vis=False, save_bbox_vis=False)
+    # dir_path = '/ssd/data_boxing_hard/'
+    # for video in tqdm(os.listdir(dir_path)):
+    #     video_path = os.path.join(dir_path,  video, 'images') 
+    #     process_model.generate_from_split_images_with_bbox(None, source_video_frame_dir=video_path)
