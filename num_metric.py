@@ -253,6 +253,9 @@ class ObjectPermanenceMetric():
         else: 
             raise  NoObjFoundError(video_path)
 
+    def __call__(self, video_path):
+        return self.infer(video_path)
+
 class NoObjFoundError(Exception):
     def __init__(self, video_path):
         super().__init__()

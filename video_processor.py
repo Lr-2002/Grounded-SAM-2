@@ -153,7 +153,9 @@ class VideoProcessor:
             torch.backends.cudnn.allow_tf32 = True
 
         # init sam image predictor and video predictor model
-        sam2_checkpoint = "./checkpoints/sam2_hiera_large.pt"
+        root_path = os.path.dirname(os.path.abspath(__file__))
+        sam2_checkpoint = os.path.join(root_path, "checkpoints/sam2_hiera_large.pt")
+        print(sam2_checkpoint)
         model_cfg = "sam2_hiera_l.yaml"
 
         self.video_predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint)
