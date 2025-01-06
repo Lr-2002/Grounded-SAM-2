@@ -18,11 +18,8 @@ class MaskGenerator:
 
     def infer_two_video(self, gt_video, ge_video, bbox_list=None):
         # video path should only contain videos
-        # bbox_list = [[115, 57, 178, 143], [331, 165, 404, 254]]
         frame_data_1, bbox_list_1 = self.vp.get_detections_with_bbox(
-            gt_video,
-            source_video_frame_dir=gt_video,
-            input_boxes=bbox_list,
+            gt_video, source_video_frame_dir=gt_video, input_boxes=bbox_list
         )
         bbox_list = bbox_list if bbox_list else bbox_list_1
         frame_data_2, bbox_list_2 = self.vp.get_detections_with_bbox(
