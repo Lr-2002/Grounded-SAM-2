@@ -9,8 +9,8 @@ import supervision as sv
 import os
 import sys
 
-sys.path.append("/home/lr-2002/code/oawm_dev/dataset_generator/gsam2/")
-print(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+module_path = os.path.dirname(os.path.abspath(__file__))
 from pathlib import Path
 from tqdm import tqdm
 from PIL import Image, ImageDraw
@@ -30,11 +30,11 @@ def import_from_path(module_name, file_path):
 # 从 repo1 加载 utils.track_utils
 track_utils = import_from_path(
     "track_utils",
-    "/home/lr-2002/code/oawm_dev/dataset_generator/gsam2/utils/track_utils.py",
+    module_path + "/utils/track_utils.py",
 )
 video_utils = import_from_path(
     "video_utils",
-    "/home/lr-2002/code/oawm_dev/dataset_generator/gsam2/utils/video_utils.py",
+    module_path + "/utils/video_utils.py",
 )
 print(dir(video_utils))
 create_video_from_images = video_utils.create_video_from_images
